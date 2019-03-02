@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from parlai.core.torch_agent import TorchAgent, Output
 from torch import optim
-
+import global_variables as gl
 
 class BagOfNGrams(nn.Module):
     def init_layers(self):
@@ -148,7 +148,7 @@ class seq2seq(nn.Module):
         self.decoder.eval()
 
         predictions = []
-        encoder_input = torch.LongTensor([BOS_IDX] * N).unsqueeze(0)
+        encoder_input = torch.LongTensor([gl.SOS_IDX] * N).unsqueeze(0)
 
         for _ in range(self.longest_label):
             decoder_input = self.encoder(encoder_input)

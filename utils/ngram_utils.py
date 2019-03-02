@@ -17,6 +17,7 @@ import pandas
 import altair
 import pygtrie
 
+import global_variables as gl
 
 # Load English tokenizer, tagger, parser, NER and word vectors
 tokenizer = spacy.load('en_core_web_sm')               
@@ -54,7 +55,7 @@ def tokenize_dataset(dataset):
 def pad_sentences(input_list, n):
     result_list = []
     for l in input_list:
-        padded = ["<bos>" for i in range((n - 1))] + l +["<eos>" for i in range((n - 1))]
+        padded = [gl.SOS_TOKEN for i in range((n - 1))] + l +[gl.EOS_TOKEN for i in range((n - 1))]
         result_list.append(padded)
     return result_list
 
@@ -74,19 +75,14 @@ def ngram_counts(data, frac_vocab=0.9):
     return vocab, count
 
 def ngram_dict(vocab):
-    PAD_IDX = 0
-    UNK_IDX = 1 
-    BOS_IDX = 2
-    EOS_IDX = 3
-    
     id2token = list(vocab)
     token2id = dict(zip(vocab, range(4, 4+len(vocab)))) 
-    id2token = ['<pad>', '<unk>', '<bos>', '<eos>'] + id2token
+    id2token = [gl.PAD_TOKEN, gl.UNK_TOKEN, gl.SOS_TOKEN, gl.EOS_TOKEN] + id2token
 
-    token2id['<pad>'] = PAD_IDX 
-    token2id['<unk>'] = UNK_IDX
-    token2id['<bos>'] = BOS_IDX 
-    token2id['<eos>'] = EOS_IDX
+    token2id[gl.PAD_TOKEN] = gl.PAD_IDX 
+    token2id[gl.UNK_TOKEN] = gl.UNK_IDX
+    token2id[gl.SOS_TOKEN] = gl.SOS_IDX 
+    token2id[gl.EOS_TOKEN] = gl.EOS_IDX
 
     return id2token, token2id
 
@@ -272,7 +268,7 @@ def sample_from_pd(prev_tokens, vocab_ngram, count_ngram, voc, print_nonzero_pro
     
 def generate_sentence(num_tokens, vocab_ngram, count_ngram, voc, n):
     sentence = []
-    prev_tokens = tuple(['<bos>'] * (n - 1))
+    prev_tokens = tuple(gl.SOS_TOKEN * (n - 1))
 #     print(prev_tokens)
     for i in range(num_tokens):
         next_token = sample_from_pd(prev_tokens, vocab_ngram, count_ngram, voc)
@@ -295,8 +291,8 @@ def get_perplexity(test_sentences, vocab_ngram, count_ngram):
     return ppl
 
 def _text2id(doc, token2id):
-    return [token2id[t] if t in token2id else UNK_IDX for t in doc]
-
+    return [token2id[t] if t in token2id else gl.UNK_IDX for t in doc]
+    
 def _id2text(vec, id2token):
     return [id2token[i] for i in vec]
 
