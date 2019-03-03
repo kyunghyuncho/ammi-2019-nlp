@@ -1,3 +1,4 @@
+import torch
 from torchtext.data import TabularDataset 
 from torch.utils.data import Dataset, DataLoader
 
@@ -11,7 +12,6 @@ class AmazonDataset(Dataset):
         self.data_tensors = []
         device = torch.device("cuda" if (torch.cuda.is_available() and use_cuda) else "cpu")
         for (i, t) in tqdm_notebook(self.data):
-            print(i, t)
             self.data_tensors.append((torch.LongTensor(i[:self.max_len]).to(device), \
                                         torch.LongTensor([t]).to(device)))
                 

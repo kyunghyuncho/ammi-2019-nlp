@@ -16,7 +16,6 @@ import re
 import pandas
 import altair
 import pygtrie
-
 import global_variables as gl
 
 # Load English tokenizer, tagger, parser, NER and word vectors
