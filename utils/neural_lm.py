@@ -32,6 +32,7 @@ class BagOfNGrams(nn.Module):
             self.layers.append(nn.Linear(self.hidden_size, self.hidden_size))
             self.layers.append(self.activation())
             self.layers.append(nn.Dropout(p=dropout)) 
+            
         self.layers.append(nn.Linear(self.hidden_size, self.out_size))
         self.init_layers()
     
@@ -71,7 +72,7 @@ class DecoderMLP(nn.Module):
         return scores 
     
 class seq2seq(nn.Module):
-    def __init__(self, encoder, decoder, lr = 1e-3, use_cuda = True, 
+    def __init__(self, encoder, decoder, id2token, lr = 1e-3, use_cuda = True, 
                         longest_label = 20, 
                         clip = 0.3):
         super(seq2seq, self).__init__()
@@ -80,6 +81,8 @@ class seq2seq(nn.Module):
         self.device = device;
         self.encoder = encoder.to(device);
         self.decoder = decoder.to(device)
+        
+        self.id2token = id2token
 
         self.longest_label = longest_label
 
@@ -92,6 +95,7 @@ class seq2seq(nn.Module):
 
         self.longest_label = longest_label
         self.clip = clip;
+        
         
     def zero_grad(self):
         """Zero out optimizer."""
@@ -107,7 +111,7 @@ class seq2seq(nn.Module):
             optimizer.step()
     
     def v2t(self, vector):
-        return [train_id2token_unigram[i] for i in vector]
+        return [self.id2token[i] for i in vector]
         
     def train_step(self, xs, ys):
         """Train model to produce ys given xs.
@@ -146,8 +150,11 @@ class seq2seq(nn.Module):
         # just predict
         self.encoder.eval()
         self.decoder.eval()
+        
+        N = 10
 
         predictions = []
+        # TODO: change 10 below to be something you set at the beg
         encoder_input = torch.LongTensor([gl.SOS_IDX] * N).unsqueeze(0)
 
         for _ in range(self.longest_label):
@@ -162,7 +169,7 @@ class seq2seq(nn.Module):
             encoder_input = torch.cat((prev_tokens, next_token), 0).unsqueeze(0)
             
             # stop if you've found the 
-            if next_token.item() == EOS_IDX:
+            if next_token.item() == gl.EOS_IDX:
                 break
                 
         predictions = torch.cat(predictions, 0)

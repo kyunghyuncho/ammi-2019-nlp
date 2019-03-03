@@ -6,6 +6,7 @@ import itertools
 from operator import itemgetter 
 from glob import glob
 from tqdm import tqdm_notebook, tqdm
+_tqdm = tqdm_notebook
 from collections import Counter
 import string
 import re
@@ -41,7 +42,7 @@ def tokenize_dataset(dataset):
     # tokenize all words -- each token will be an item in all_tokens (in the order given by the list of sentences)
     all_tokens = []     # all the tokens -- 
 
-    for sample in tqdm_notebook(tokenizer.pipe(dataset, disable=['parser', 'tagger', 'ner'], batch_size=512, n_threads=1)):
+    for sample in tqdm(tokenizer.pipe(dataset, disable=['parser', 'tagger', 'ner'], batch_size=512, n_threads=1)):
 #         tokens = lower_case_remove_punc(sample)
         tokens = lower_case(sample)       # make words lower case
 #         tokens = remove_punct(tokens)     # remove punctuation

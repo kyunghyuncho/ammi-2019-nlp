@@ -1,7 +1,11 @@
 import torch
 from torchtext.data import TabularDataset 
 from torch.utils.data import Dataset
-from tqdm import tqdm_notebook
+from tqdm import tqdm_notebook, tqdm
+_tqdm = tqdm_notebook
+from operator import itemgetter 
+import global_variables as gl
+
 
 class AmazonDataset(Dataset):
     def __init__(self, data_list, max_inp_length=None, use_cuda=True):
@@ -12,7 +16,7 @@ class AmazonDataset(Dataset):
         self.max_len = max_inp_length
         self.data_tensors = []
         device = torch.device("cuda" if (torch.cuda.is_available() and use_cuda) else "cpu")
-        for (i, t) in tqdm_notebook(self.data):
+        for (i, t) in tqdm(self.data):
             self.data_tensors.append((torch.LongTensor(i[:self.max_len]).to(device), \
                                         torch.LongTensor([t]).to(device)))
                 
@@ -45,7 +49,7 @@ def batchify(batch):
     batch_list = []
     target_list = []
     for b in batch:
-        batch_list.append(pad(b[0], maxlen, dim=0, pad=PAD_IDX))
+        batch_list.append(pad(b[0], maxlen, dim=0, pad=gl.PAD_IDX))
         target_list.append(b[1])
     input_batch = torch.stack(batch_list, 0)
     target_batch = torch.stack(target_list, 0)
