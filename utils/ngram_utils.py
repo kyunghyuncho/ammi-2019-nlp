@@ -64,29 +64,43 @@ class NgramLM:
         self.ngram_data = self.find_ngrams(self.n)
         
         self.vocab_ngram, self.count_ngram = self.ngram_counts(self.n)
-        self.id2token, self.token2id = self.ngram_dict(self.n)
+        self.id2token, self.token2id = self.ngram_dict()
             
         self.vocab_unigram, self.count_unigram = self.ngram_counts(1)
         self.vocab_bigram, self.count_bigram = self.ngram_counts(2)
         self.vocab_trigram, self.count_trigram = self.ngram_counts(3)
-        self.vocab_prev_ngram, self.count_prev_ngram = self.ngram_counts(self.n - 1)
+        
+        if n > 1:
+            self.vocab_prev_ngram, self.count_prev_ngram = self.ngram_counts(self.n - 1)
+        else:
+            self.vocab_prev_ngram = None
+            self.count_prev_ngram = None
         
         
-    def pad_sentences(self, n):
+    def pad_sentences(self, n, sentence=None):
+        if sentence:
+            data = sentence
+        else:
+            data = self.raw_data
         result_list = []
-        for l in self.raw_data:
-            padded = [gl.SOS_TOKEN for i in range((n - 1))] + l +[gl.EOS_TOKEN for i in range((n - 1))]
+        for l in data:
+            padded = [gl.SOS_TOKEN for i in range(n - 1)] + l + [gl.EOS_TOKEN for i in range(n - 1)]
             result_list.append(padded)
         return result_list
 
-    def find_ngrams(self, n):
+    def find_ngrams(self, n, sentence=None):
+        if sentence:
+            data = sentence
+        else:
+            data = self.pad_sentences(n)
         result_list = []
-        padded_data = self.pad_sentences(n)
-        for l in padded_data:
+        for l in data:
             result_list.append(list(zip(*[l[i:] for i in range(n)])))
         return result_list
 
-    def ngram_counts(self, n):    
+    def ngram_counts(self, n=None): 
+        if n == None:
+            n = self.n
         ngram_data = self.find_ngrams(n)
         all_train_tokens = list(mit.flatten(ngram_data))
         
@@ -97,7 +111,7 @@ class NgramLM:
 
         return vocab, count
 
-    def ngram_dict(self, n):        
+    def ngram_dict(self): 
         id2token = list(self.vocab_ngram)
         token2id = dict(zip(self.vocab_ngram, range(4, 4+len(self.vocab_ngram)))) 
         id2token = [gl.PAD_TOKEN, gl.UNK_TOKEN, gl.SOS_TOKEN, gl.EOS_TOKEN] + id2token
@@ -109,10 +123,15 @@ class NgramLM:
 
         return id2token, token2id
       
-    def get_ngram_count(self, ngram):
-        if ngram in self.vocab_ngram:
-            ngram_idx = self.vocab_ngram.index(ngram)
-            return self.count[ngram_idx] 
+    def get_ngram_count(self, ngram, vocab=None, count=None):
+        if vocab == None:
+            vocab = self.vocab_ngram
+        if count == None:
+            count = self.count_ngram
+        
+        if ngram in vocab:
+            ngram_idx = vocab.index(ngram)
+            return count[ngram_idx] 
         else:
             return 0
 
@@ -122,16 +141,16 @@ class NgramLM:
         for t in self.vocab_ngram:
             if t[:-1] == ngram[:-1]:
     #             print(t, get_ngram_count(self, t))
-                all_counts += get_ngram_count(self, t)
+                all_counts += self.get_ngram_count(t)
         if all_counts > 0:
             return c / all_counts
         else:
             return 0
 
-    def get_ngram_prob_addditive_smoothing(self, ngram, delta=0.5):
+    def get_ngram_prob_additive_smoothing(self, ngram, delta=0.5):
         c = self.get_ngram_count(ngram) + delta*1
         all_counts = 0
-        for t in self.vocab:
+        for t in self.vocab_ngram:
             if t[:-1] == ngram[:-1]:
     #             print(t, get_ngram_count(self, t))
                 all_counts += self.get_ngram_count(t)
@@ -144,7 +163,7 @@ class NgramLM:
     def get_ngram_prob_add_one_smoothing(self, ngram):
         c = self.get_ngram_count(ngram) + 1
         all_counts = 0
-        for t in self.vocab:
+        for t in self.vocab_ngram:
             if t[:-1] == ngram[:-1]:
     #             print(t, self.get_ngram_count(t))
                 all_counts += self.get_ngram_count(t)
@@ -154,31 +173,32 @@ class NgramLM:
         else:
             return 0
 
-    def get_ngram_prob_interpolation_smoothing(self, ngram, vocab, count, prev_vocab, prev_count, alpha=0.5):
-        c = self.get_ngram_count(ngram, vocab, count)
+    def get_ngram_prob_interpolation_smoothing(self, ngram, alpha=0.8):
+        c = self.get_ngram_count(ngram, self.vocab_ngram, self.count_ngram)
         all_counts = 0
-        for t in vocab:
+        for t in self.vocab_ngram:
             if t[:-1] == ngram[:-1]:
-    #             print(t, self.get_ngram_count(t, vocab, count))
-                all_counts += self.get_ngram_count(t, vocab, count)
+    #             print(t, get_ngram_count(t, vocab, count))
+                all_counts += self.get_ngram_count(t, self.vocab_ngram, self.count_ngram)
         if all_counts > 0:
             prob_ngram = c / all_counts
         else:
             prob_ngram = 0
 
         prev_ngram = tuple(list(ngram[1:]))
-        prev_c = self.get_ngram_count(prev_ngram, prev_vocab, prev_count)
+        prev_c = self.get_ngram_count(prev_ngram, self.vocab_prev_ngram, self.count_prev_ngram)
     #     print(prev_c)
         prev_all_counts = 0
-        for prev_t in prev_vocab:
+        for prev_t in self.vocab_prev_ngram:
             if prev_t[:-1] == prev_ngram[:-1]:
-    #             print(prev_t, get_ngram_count(prev_t, prev_vocab, prev_count))
-                prev_all_counts += self.get_ngram_count(prev_t, prev_vocab, prev_count)
+    #             print(prev_t, self.get_ngram_count(prev_t, self.vocab_prev_ngram, self.count_prev_ngram))
+                prev_all_counts += self.get_ngram_count(prev_t, self.vocab_prev_ngram, self.count_prev_ngram)
         if prev_all_counts > 0:
             prob_prev_ngram = prev_c / prev_all_counts
         else:
             0
         return alpha*(prob_ngram) + (1-alpha)*prob_prev_ngram
+
 
     def get_unigram_count(self, r):
         return np.sum([1 for i in range(len(self.vocab_unigram)) if self.count_unigram[i] == r])
@@ -223,7 +243,7 @@ class NgramLM:
         return p_uni
 
     def get_p_bi(self, w, v):   # w given v
-        if tuple([v] + [w]) in vocab_bigram:
+        if tuple([v] + [w]) in self.vocab_bigram:
             vw_idx = self.vocab_bigram.index(tuple([v] + [w]))
             N_vw = self.count_bigram[vw_idx]
         else:
@@ -249,11 +269,10 @@ class NgramLM:
 
         return p_bi
 
-
     def get_prob_sentence(self, sentence):
-        padded_sentence = self.pad_sentences(sentence)  # needs a list
+        padded_sentence = self.pad_sentences(self.n, sentence=sentence)  # needs a list
     #     print(padded_sentence)
-        ngram_sentence = self.find_ngrams(padded_sentence)[0] # only one element in list
+        ngram_sentence = self.find_ngrams(self.n, sentence=padded_sentence)[0] # only one element in list
     #     print(ngram_sentence)
         prob = 1
         for ngram in ngram_sentence:
@@ -263,7 +282,7 @@ class NgramLM:
         return prob
 
     def get_prob_distr_ngram(self, prev_tokens):
-        pd = [0 for v in voc]
+        pd = [0 for v in self.vocabulary]
         for idx, token in enumerate(self.vocabulary):
     #         print("token: ", token)
     #         print("prev ngram: ", prev_tokens)
@@ -277,6 +296,7 @@ class NgramLM:
 
     def sample_from_pd(self, prev_tokens):
         pd = self.get_prob_distr_ngram(prev_tokens)
+        print(sum(pd))
         idx_next_token = np.random.choice(len(self.vocabulary), 1, p=pd)[0]
         return self.vocabulary[idx_next_token]
 
@@ -313,12 +333,12 @@ class NgramLM:
     def create_data_id(self, data):
         data_id = []
         for d in data:
-            data_id.append(self._text2id(self, d))
+            data_id.append(self._text2id(d))
         return data_id
 
-    def create_data_id_merged(self, data):
+    def create_data_id_merged(self, data, N):
         data_id_merged = []
         for d in data:
-            for i in range(len(d) - self.n):
-                data_id_merged.append((d[i:i+n], d[i+n]))
+            for i in range(len(d) - N):
+                data_id_merged.append((d[i:i+N], d[i+N]))
         return data_id_merged
