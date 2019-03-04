@@ -59,7 +59,7 @@ class BagOfWords(nn.Module):
         for l in self.layers:
             x = l(x)
 
-       return None, x.unsqueeze(0)
+        return None, x.unsqueeze(0)
 
 
 class EncoderRNN(nn.Module):
