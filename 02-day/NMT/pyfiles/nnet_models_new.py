@@ -9,44 +9,55 @@ import bleu_score
 
 
 class BagOfWords(nn.Module):
-   def init_layers(self):
-       for l in self.layers:
-           if getattr(l, 'weight', None) is not None:
-               torch.nn.init.xavier_uniform_(l.weight)
+    def init_layers(self):
+        for l in self.layers:
+            if getattr(l, "weight", None) is not None:
+                torch.nn.init.xavier_uniform_(l.weight)
 
-   def __init__(self, input_size, hidden_size=512, reduce='sum', nlayers=2, activation='ReLU', dropout=0.1, batch_norm=False):
-       super(BagOfWords, self).__init__()
+    def __init__(
+        self,
+        input_size,
+        hidden_size=512,
+        reduce="sum",
+        nlayers=2,
+        activation="ReLU",
+        dropout=0.1,
+        batch_norm=False,
+    ):
+        super(BagOfWords, self).__init__()
 
-       self.emb_dim = hidden_size
-       self.reduce = reduce
-       self.nlayers = nlayers
-       self.hidden_size = hidden_size
+        self.emb_dim = hidden_size
+        self.reduce = reduce
+        self.nlayers = nlayers
+        self.hidden_size = hidden_size
 
-       self.activation = getattr(nn, activation)
+        self.activation = getattr(nn, activation)
 
-       self.embedding = nn.EmbeddingBag(num_embeddings=input_size, embedding_dim=self.emb_dim, mode=reduce)
+        self.embedding = nn.EmbeddingBag(
+            num_embeddings=input_size, embedding_dim=self.emb_dim, mode=reduce
+        )
 
-       if batch_norm is True:
-           self.batch_norm = nn.BatchNorm1d(self.emb_dim)
-       self.layers = nn.ModuleList([nn.Linear(self.emb_dim, self.hidden_size)])
+        if batch_norm is True:
+            self.batch_norm = nn.BatchNorm1d(self.emb_dim)
+        self.layers = nn.ModuleList([nn.Linear(self.emb_dim, self.hidden_size)])
 
-       self.layers.append(self.activation())
-       self.layers.append(nn.Dropout(p=dropout))
-       for i in range(self.nlayers-2):
-           self.layers.append(nn.Linear(self.hidden_size, self.hidden_size))
-           self.layers.append(self.activation())
-           self.layers.append(nn.Dropout(p=dropout))
-       self.layers.append(nn.Linear(self.hidden_size, self.hidden_size))
-       self.init_layers()
+        self.layers.append(self.activation())
+        self.layers.append(nn.Dropout(p=dropout))
+        for i in range(self.nlayers - 2):
+            self.layers.append(nn.Linear(self.hidden_size, self.hidden_size))
+            self.layers.append(self.activation())
+            self.layers.append(nn.Dropout(p=dropout))
+        self.layers.append(nn.Linear(self.hidden_size, self.hidden_size))
+        self.init_layers()
 
-   def forward(self, x):
-       postemb = self.embedding(x)
-       if hasattr(self, 'batch_norm'):
-           x = self.batch_norm(postemb)
-       else:
-           x = postemb
-       for l in self.layers:
-           x = l(x)
+    def forward(self, x):
+        postemb = self.embedding(x)
+        if hasattr(self, "batch_norm"):
+            x = self.batch_norm(postemb)
+        else:
+            x = postemb
+        for l in self.layers:
+            x = l(x)
 
        return None, x.unsqueeze(0)
 
@@ -64,8 +75,9 @@ class EncoderRNN(nn.Module):
         self.hidden_size = hidden_size
 
         self.embedding = nn.Embedding(input_size, hidden_size)
-        self.gru = nn.GRU(hidden_size, hidden_size, num_layers=numlayers,
-                          batch_first=True)
+        self.gru = nn.GRU(
+            hidden_size, hidden_size, num_layers=numlayers, batch_first=True
+        )
 
     def forward(self, input, hidden=None):
         """Return encoded state.
@@ -75,7 +87,6 @@ class EncoderRNN(nn.Module):
         embedded = self.embedding(input)
         output, hidden = self.gru(embedded, hidden)
         return output, hidden
-
 
 
 class DecoderRNN(nn.Module):
@@ -91,8 +102,9 @@ class DecoderRNN(nn.Module):
         self.hidden_size = hidden_size
 
         self.embedding = nn.Embedding(output_size, hidden_size)
-        self.gru = nn.GRU(hidden_size, hidden_size, num_layers=numlayers,
-                          batch_first=True)
+        self.gru = nn.GRU(
+            hidden_size, hidden_size, num_layers=numlayers, batch_first=True
+        )
         self.out = nn.Linear(hidden_size, output_size)
         self.softmax = nn.LogSoftmax(dim=2)
 
@@ -168,18 +180,28 @@ class Decoder_SelfAttn(nn.Module):
 
 
 class seq2seq(nn.Module):
-
-    def __init__(self, encoder, decoder, lr = 1e-3, use_cuda = True, 
-                        hiddensize = 128, numlayers = 2, target_lang = None, longest_label = 20, 
-                        clip = 0.3):
+    def __init__(
+        self,
+        encoder,
+        decoder,
+        lr=1e-3,
+        use_cuda=True,
+        hiddensize=128,
+        numlayers=2,
+        target_lang=None,
+        longest_label=20,
+        clip=0.3,
+    ):
         super(seq2seq, self).__init__()
 
-        device = torch.device("cuda" if (torch.cuda.is_available() and use_cuda) else "cpu")
-        self.device = device;
-        self.encoder = encoder.to(device);
+        device = torch.device(
+            "cuda" if (torch.cuda.is_available() and use_cuda) else "cpu"
+        )
+        self.device = device
+        self.encoder = encoder.to(device)
         self.decoder = decoder.to(device)
 
-        self.target_lang = target_lang;
+        self.target_lang = target_lang
 
         self.bl = bleu_score.BLEU_SCORE()
 
@@ -193,20 +215,21 @@ class seq2seq(nn.Module):
         # }
 
         self.optims = {
-             'nmt': optim.SGD(self.parameters(), lr=lr, nesterov=True, momentum = 0.99)
+            "nmt": optim.SGD(self.parameters(), lr=lr, nesterov=True, momentum=0.99)
         }
 
-        self.scheduler = {};
+        self.scheduler = {}
         for x in self.optims.keys():
-            self.scheduler[x] = ReduceLROnPlateau(self.optims[x], mode = 'max', min_lr=1e-4,  patience=0, verbose = True);
+            self.scheduler[x] = ReduceLROnPlateau(
+                self.optims[x], mode="max", min_lr=1e-4, patience=0, verbose=True
+            )
 
         self.longest_label = longest_label
         self.hiddensize = hiddensize
         self.numlayers = numlayers
-        self.clip = clip;
+        self.clip = clip
         self.START = torch.LongTensor([global_variables.SOS_token]).to(device)
-        self.END_IDX = global_variables.EOS_token;
-
+        self.END_IDX = global_variables.EOS_token
 
     def zero_grad(self):
         """Zero out optimizer."""
@@ -225,7 +248,6 @@ class seq2seq(nn.Module):
         for scheduler in self.scheduler.values():
             scheduler.step(val_bleu)
 
-
     def v2t(self, vector):
         """Convert vector to text.
         :param vector: tensor of token indices.
@@ -243,16 +265,17 @@ class seq2seq(nn.Module):
 
         elif vector.dim() == 2:
             return [self.v2t(vector[i]) for i in range(vector.size(0))]
-        raise RuntimeError('Improper input to v2t with dimensions {}'.format(
-            vector.size()))
+        raise RuntimeError(
+            "Improper input to v2t with dimensions {}".format(vector.size())
+        )
 
     def get_bleu_score(self, val_loader):
         predicted_list = []
         real_list = []
 
         for data in val_loader:
-            predicted_list += self.eval_step(data);
-            real_list += self.v2t(data.label_vec);
+            predicted_list += self.eval_step(data)
+            real_list += self.v2t(data.label_vec)
 
         return self.bl.corpus_bleu(predicted_list, [real_list])[0]
 
@@ -285,8 +308,10 @@ class seq2seq(nn.Module):
         # Teacher forcing: Feed the target as the next input
         y_in = ys.narrow(1, 0, ys.size(1) - 1)
         decoder_input = torch.cat([starts, y_in], 1)
+
         decoder_output, decoder_hidden, _ = self.decoder(decoder_input,
                                                       encoder_hidden)
+
 
         scores = decoder_output.view(-1, decoder_output.size(-1))
         loss = self.criterion(scores, ys.view(-1))
@@ -294,7 +319,7 @@ class seq2seq(nn.Module):
         self.update_params()
 
         _max_score, predictions = decoder_output.max(2)
-        return self.v2t(predictions), loss.item() 
+        return self.v2t(predictions), loss.item()
 
     def eval_step(self, batch):
         """Generate a response to the input tokens.
@@ -324,8 +349,10 @@ class seq2seq(nn.Module):
 
         for i in range(self.longest_label):
             # generate at most longest_label tokens
+
             decoder_output, decoder_hidden, _ = self.decoder(decoder_input,
                                                           decoder_hidden)
+
             _max_score, preds = decoder_output.max(2)
             predictions.append(preds)
             decoder_input = preds  # set input to next step
@@ -343,4 +370,3 @@ class seq2seq(nn.Module):
                 break
         predictions = torch.cat(predictions, 1)
         return self.v2t(predictions)
-
