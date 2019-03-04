@@ -154,6 +154,7 @@ class seq2seq(nn.Module):
         # just predict
         self.encoder.eval()
         self.decoder.eval()
+        
 
         encoder_input = torch.LongTensor([gl.SOS_IDX] * self.size_ngrams)
         encoder_input = encoder_input.unsqueeze(0).repeat(bsz, 1)
@@ -167,10 +168,8 @@ class seq2seq(nn.Module):
             decoder_output = self.decoder(decoder_input)
             _max_score, next_token = decoder_output.max(1)
             
-            print(next_token.shape)
-            predictions.append(next_token.unsqueeze(1))
+            predictions.append(next_token)
             
-            prev_tokens = torch.cat([encoder_input.squeeze(0)[1:self.size_ngrams]])            
             indices = torch.tensor([i for i in range(1, self.size_ngrams)])
             prev_tokens = torch.index_select(encoder_input, 1, indices)
     
@@ -187,8 +186,8 @@ class seq2seq(nn.Module):
             if total_done == bsz:
                 # no need to generate any more
                 break
-        print(len(predictions), predictions[0].shape)
-        
-        predictions = torch.cat(predictions, 1)
-        print("predictions ", predictions.shape)
-        return self.v2t(predictions)
+                
+        tokenized_predictions = [self.v2t(p) for p in predictions]
+        predictions_bsz = [[p[i][0] for p in tokenized_predictions] for i in range(bsz)]
+    
+        return predictions_bsz
