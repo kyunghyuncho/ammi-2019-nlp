@@ -60,7 +60,7 @@ class DecoderMLP(nn.Module):
             
         self.linear = nn.Linear(input_size, hidden_size)
         self.out = nn.Linear(hidden_size, output_size)
-        self.softmax = nn.LogSoftmax(dim=1)
+        self.log_softmax = nn.LogSoftmax(dim=1)
 
     def forward(self, input):
         """Return encoded state.
@@ -68,7 +68,8 @@ class DecoderMLP(nn.Module):
         :param hidden: past (e.g. encoder) hidden state
         """
         output = F.relu(self.linear(input))
-        scores = self.softmax(self.out(output))
+        scores = self.log_softmax(self.out(output))
+        
         return scores 
     
 class seq2seq(nn.Module):
@@ -140,7 +141,7 @@ class seq2seq(nn.Module):
         
         return self.v2t(predictions), loss.item() 
 
-    def eval_step(self, xs, use_context=False):
+    def eval_step(self, xs, use_context=False, score_only=False):
         """Generate a response to the input tokens.
         :param batch: parlai.core.torch_agent.Batch, contains tensorized
                       version of observations.
@@ -155,28 +156,37 @@ class seq2seq(nn.Module):
         self.encoder.eval()
         self.decoder.eval()
         
-        if use_context:
-            encoder_input = xs   # this needs to be of shape bsz, self.size_ngrams
-        else:
+        if score_only or not use_context:
             encoder_input = torch.LongTensor([gl.SOS_IDX] * self.size_ngrams)
             encoder_input = encoder_input.unsqueeze(0).repeat(bsz, 1)
-                        
+        else:
+            encoder_input = xs   # this needs to be of shape bsz, self.size_ngrams
+                
         predictions = []
         done = [False for _ in range(bsz)]
         total_done = 0
+        scores = torch.ones(bsz)
         
-        for _ in range(self.longest_label):
+        if score_only:
+            num_predictions = xs.size(1)
+        else:
+            num_predictions = self.longest_label
+
+        for i in range(num_predictions):
             decoder_input = self.encoder(encoder_input)
             decoder_output = self.decoder(decoder_input)
             _max_score, next_token = decoder_output.max(1)
             
-            predictions.append(next_token)
+            scores = scores * _max_score
             
+            if score_only:   # replace the next token with the one in the input data
+                next_token = torch.index_select(xs, 1, torch.tensor([i])).squeeze(1)
+                
+            predictions.append(next_token)
             indices = torch.tensor([i for i in range(1, self.size_ngrams)])
             prev_tokens = torch.index_select(encoder_input, 1, indices)
-    
             encoder_input = torch.cat((prev_tokens, next_token.unsqueeze(1)), 1)
-                
+
             # stop if you've found the 
             for b in range(bsz):
                 if not done[b]:
@@ -188,8 +198,8 @@ class seq2seq(nn.Module):
             if total_done == bsz:
                 # no need to generate any more
                 break
-                
-        tokenized_predictions = [self.v2t(p) for p in predictions]
-        predictions_bsz = [[p[i][0] for p in tokenized_predictions] for i in range(bsz)]
+        
+        predictions = [self.v2t(p) for p in predictions]
+        predictions = [[p[i][0] for p in predictions] for i in range(bsz)]
     
-        return predictions_bsz
+        return predictions, scores
