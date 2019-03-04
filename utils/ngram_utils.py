@@ -296,7 +296,6 @@ class NgramLM:
 
     def sample_from_pd(self, prev_tokens):
         pd = self.get_prob_distr_ngram(prev_tokens)
-        print(sum(pd))
         idx_next_token = np.random.choice(len(self.vocabulary), 1, p=pd)[0]
         return self.vocabulary[idx_next_token]
 
