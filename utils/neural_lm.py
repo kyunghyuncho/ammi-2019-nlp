@@ -140,7 +140,7 @@ class seq2seq(nn.Module):
         
         return self.v2t(predictions), loss.item() 
 
-    def eval_step(self, xs):
+    def eval_step(self, xs, use_context=False):
         """Generate a response to the input tokens.
         :param batch: parlai.core.torch_agent.Batch, contains tensorized
                       version of observations.
@@ -155,10 +155,12 @@ class seq2seq(nn.Module):
         self.encoder.eval()
         self.decoder.eval()
         
-
-        encoder_input = torch.LongTensor([gl.SOS_IDX] * self.size_ngrams)
-        encoder_input = encoder_input.unsqueeze(0).repeat(bsz, 1)
-        
+        if use_context:
+            encoder_input = xs   # this needs to be of shape bsz, self.size_ngrams
+        else:
+            encoder_input = torch.LongTensor([gl.SOS_IDX] * self.size_ngrams)
+            encoder_input = encoder_input.unsqueeze(0).repeat(bsz, 1)
+                        
         predictions = []
         done = [False for _ in range(bsz)]
         total_done = 0
