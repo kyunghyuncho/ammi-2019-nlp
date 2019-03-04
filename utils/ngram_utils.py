@@ -15,8 +15,9 @@ from collections import Counter
 import re
 import pandas
 import altair
-import pygtrie
+import pygtrie 
 import global_variables as gl
+
 
 # Load English tokenizer, tagger, parser, NER and word vectors
 tokenizer = spacy.load('en_core_web_sm')               
@@ -75,7 +76,11 @@ class NgramLM:
         else:
             self.vocab_prev_ngram = None
             self.count_prev_ngram = None
-        
+            
+        self.trie_ngram = self.make_trie(self.n)
+        self.trie_unigram = self.make_trie(1)
+        self.trie_bigram = self.make_trie(2)
+        self.trie_trigram = self.make_trie(3)
         
     def pad_sentences(self, n, sentence=None):
         if sentence:
@@ -110,7 +115,23 @@ class NgramLM:
         vocab, count = zip(*counted_tokens.most_common(max_vocab_size))
 
         return vocab, count
-
+    
+    def convert_to_trie(self, x):
+        return '/'.join(x) 
+    
+    def make_trie(self, n=None):
+        if n == None:
+            n = self.n
+        vocab_ngram, count_ngram = self.ngram_counts(n)
+        
+        trie = pygtrie.StringTrie()
+        for vn, cn in zip(vocab_ngram, count_ngram):
+            tn = self.convert_to_trie(vn)
+            if tn not in trie:
+                trie[tn] = cn
+                
+        return trie 
+    
     def ngram_dict(self): 
         id2token = list(self.vocab_ngram)
         token2id = dict(zip(self.vocab_ngram, range(4, 4+len(self.vocab_ngram)))) 
@@ -122,30 +143,50 @@ class NgramLM:
         token2id[gl.EOS_TOKEN] = gl.EOS_IDX
 
         return id2token, token2id
-      
-    def get_ngram_count(self, ngram, vocab=None, count=None):
-        if vocab == None:
-            vocab = self.vocab_ngram
-        if count == None:
-            count = self.count_ngram
-        
-        if ngram in vocab:
-            ngram_idx = vocab.index(ngram)
-            return count[ngram_idx] 
+    
+    def get_ngram_count(self, ngram, vocab=None, count=None, trie=True):
+        if trie:
+            import pdb; pdb.set_trace()
+            nt = self.convert_to_trie(ngram)
+            if nt in self.trie_ngram:
+                return self.trie_ngram[ngram]
+            else:
+                return 0
         else:
-            return 0
+            if vocab == None:
+                vocab = self.vocab_ngram
+            if count == None:
+                count = self.count_ngram
+            if ngram in vocab:
+                ngram_idx = vocab.index(ngram)
+                return count[ngram_idx] 
+            else:
+                return 0
 
-    def get_ngram_prob(self, ngram):
-        c = self.get_ngram_count(ngram)
-        all_counts = 0
-        for t in self.vocab_ngram:
-            if t[:-1] == ngram[:-1]:
-    #             print(t, get_ngram_count(self, t))
-                all_counts += self.get_ngram_count(t)
-        if all_counts > 0:
-            return c / all_counts
+    def get_ngram_prob(self, ngram, trie=True):
+        if trie:
+            import pdb; pdb.set_trace()
+            c = self.get_ngram_count(ngram)
+            nt_prefix = self.convert_to_trie(ngram[:-1])
+            if nt_prefix in self.trie_ngram:
+                prefixes = self.trie_ngram.items(prefix=nt_prefix)
+                all_counts = sum([prefixes[i][1] for i in range(len(prefixes))])
+            if all_counts > 0:
+                return c / all_counts
+            else:
+                return 0
+
         else:
-            return 0
+            c = self.get_ngram_count(ngram)
+            all_counts = 0
+            for t in self.vocab_ngram:
+                if t[:-1] == ngram[:-1]:
+        #             print(t, get_ngram_count(self, t))
+                    all_counts += self.get_ngram_count(t)
+            if all_counts > 0:
+                return c / all_counts
+            else:
+                return 0
 
     def get_ngram_prob_additive_smoothing(self, ngram, delta=0.5):
         c = self.get_ngram_count(ngram) + delta*1
@@ -313,7 +354,7 @@ class NgramLM:
             sentence.append(next_token)
             print(' '.join(sentence))
         return ' '.join(sentence)
-
+    
     def get_perplexity(self, test_sentences):
         ll = 0
         num_tokens = 0
