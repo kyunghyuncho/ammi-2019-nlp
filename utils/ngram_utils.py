@@ -188,7 +188,6 @@ class NgramLM:
     def get_ngram_prob_add_one_smoothing(self, ngram):
         return self.get_ngram_prob_additive_smoothing(ngram, delta=1)
 
-    # TODO: implement this using tries
     def get_ngram_prob_interpolation_smoothing(self, ngram, alpha=0.8):
         c = self.get_ngram_count(ngram, trie=self.trie_ngram)
         prefix=  self.convert_to_trie(ngram[:-1])
@@ -237,6 +236,7 @@ class NgramLM:
         buni = self.get_unigram_count(1) / (self.get_unigram_count(1) + 2 * self.get_unigram_count(2))
         return buni
 
+    # TODO: normalize this pd
     def get_p_uni(self, w):
         N = self.num_all_tokens
         
@@ -313,10 +313,16 @@ class NgramLM:
             idx_next_token = np.random.choice(len(self.vocabulary), 1)[0]
         return self.vocabulary[idx_next_token]
 
-    # TODO: generate sentence given context
-    def generate_sentence(self, num_tokens):
+    def generate_sentence(self, num_tokens, context=None):
         sentence = []
-        prev_tokens = tuple([gl.SOS_TOKEN] * (self.n - 1))
+        if context is None:
+            prev_tokens = tuple([gl.SOS_TOKEN] * (self.n - 1))
+        else:
+            if len(context) >= self.n - 1:
+                prev_tokens = context[-(self.n - 1):]
+            else:
+                prev_tokens = tuple([gl.SOS_TOKEN] * (self.n - 1 - len(context)) + [context])
+        
         for i in range(num_tokens):
             next_token = self.sample_from_pd(prev_tokens)
             prev_tokens = tuple(list(prev_tokens[1:]) + [next_token])
