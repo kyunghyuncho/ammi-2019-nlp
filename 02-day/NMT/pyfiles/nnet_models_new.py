@@ -59,7 +59,7 @@ class BagOfWords(nn.Module):
         for l in self.layers:
             x = l(x)
 
-        return x, None
+        return None, x.unsqueeze(0)
 
 
 class EncoderRNN(nn.Module):
@@ -117,7 +117,66 @@ class DecoderRNN(nn.Module):
         rel = F.relu(emb)
         output, hidden = self.gru(rel, hidden)
         scores = self.softmax(self.out(output))
-        return scores, hidden
+        return scores, hidden, None
+
+
+
+class Decoder_SelfAttn(nn.Module):
+    """Generates a sequence of tokens in response to context with self attention"""
+
+    def __init__(self, output_size, hidden_size, idropout=0.5):
+        super(Decoder_SelfAttn, self).__init__()
+
+        self.output_size = output_size;
+        self.hidden_size = hidden_size;
+        self.embedding = nn.Embedding(output_size, hidden_size);
+        self.memory_rnn = nn.GRUCell(hidden_size, hidden_size, bias=True);
+        self.out = nn.Linear(hidden_size, output_size)
+        self.softmax = nn.LogSoftmax(dim=1)
+        
+        self.projector_summ = nn.Sequential(nn.Dropout(idropout),
+                                            nn.Linear(hidden_size*2, hidden_size),
+                                            nn.Dropout(idropout))
+        
+    def forward(self, input, memory):
+        memory = memory.transpose(0, 1);
+        emb = self.embedding(input)
+        emb = F.relu(emb)
+        
+        
+        emb = emb.transpose(0, 1);
+        return_scores = torch.empty(emb.size(0), emb.size(1), self.output_size).to(input.device)
+        
+        
+        for t in range(emb.size(0)):
+            current_vec = emb[t];
+            
+            selected_memory, attention0 = self.attention(current_vec, memory)
+
+            # recurrent
+            mem_out = self.memory_rnn(current_vec, selected_memory);
+
+            # update memory
+            memory = torch.cat([mem_out[:, None, :], memory], dim=1)
+    
+            scores = self.out(mem_out)
+            scores = self.softmax(scores);
+            return_scores[t] = scores
+            
+        return return_scores.transpose(0, 1).contiguous(), memory.transpose(0,1), attention0
+
+    def attention(self, input, memory):
+        # select memory to use
+        concat_vec = torch.cat([input,  memory[:, 0, :]], dim=1);
+        projected_vec = self.projector_summ(concat_vec);
+    
+        dot_product_values = torch.bmm(memory, projected_vec.unsqueeze(-1)).squeeze(-1);
+        
+        weights =  F.softmax(dot_product_values, dim = 1).unsqueeze(-1);
+        
+        selected_memory = torch.sum( memory * weights, dim=1)
+        return selected_memory, weights
+
 
 
 class seq2seq(nn.Module):
@@ -249,7 +308,10 @@ class seq2seq(nn.Module):
         # Teacher forcing: Feed the target as the next input
         y_in = ys.narrow(1, 0, ys.size(1) - 1)
         decoder_input = torch.cat([starts, y_in], 1)
-        decoder_output, decoder_hidden = self.decoder(decoder_input, encoder_hidden)
+
+        decoder_output, decoder_hidden, _ = self.decoder(decoder_input,
+                                                      encoder_hidden)
+
 
         scores = decoder_output.view(-1, decoder_output.size(-1))
         loss = self.criterion(scores, ys.view(-1))
@@ -285,9 +347,12 @@ class seq2seq(nn.Module):
         decoder_input = starts
         decoder_hidden = encoder_hidden
 
-        for _ in range(self.longest_label):
+        for i in range(self.longest_label):
             # generate at most longest_label tokens
-            decoder_output, decoder_hidden = self.decoder(decoder_input, decoder_hidden)
+
+            decoder_output, decoder_hidden, _ = self.decoder(decoder_input,
+                                                          decoder_hidden)
+
             _max_score, preds = decoder_output.max(2)
             predictions.append(preds)
             decoder_input = preds  # set input to next step
