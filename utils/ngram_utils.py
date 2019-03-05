@@ -17,6 +17,7 @@ import pandas
 import altair
 import pygtrie 
 import global_variables as gl
+import sys
 
 
 # Load English tokenizer, tagger, parser, NER and word vectors
@@ -66,16 +67,20 @@ class NgramLM:
         
         self.vocab_ngram, self.count_ngram = self.ngram_counts(self.n)
         self.id2token, self.token2id = self.ngram_dict()
-            
+                            
         self.vocab_unigram, self.count_unigram = self.ngram_counts(1)
         self.vocab_bigram, self.count_bigram = self.ngram_counts(2)
         self.vocab_trigram, self.count_trigram = self.ngram_counts(3)
+
+        self.id2token_unigram, self.token2id_unigram = self.ngram_dict(self.vocab_unigram)
         
         if n > 1:
             self.vocab_prev_ngram, self.count_prev_ngram = self.ngram_counts(self.n - 1)
+            self.trie_prev_ngram = self.make_trie(self.n - 1)
         else:
             self.vocab_prev_ngram = None
             self.count_prev_ngram = None
+            self.trie_prev_ngram = None
             
         self.trie_ngram = self.make_trie(self.n)
         self.trie_unigram = self.make_trie(1)
@@ -132,9 +137,12 @@ class NgramLM:
                 
         return trie 
     
-    def ngram_dict(self): 
-        id2token = list(self.vocab_ngram)
-        token2id = dict(zip(self.vocab_ngram, range(4, 4+len(self.vocab_ngram)))) 
+    def ngram_dict(self, vocab=None):
+        if vocab == None:
+            vocab = self.vocab_ngram
+            
+        id2token = list(vocab)
+        token2id = dict(zip(vocab, range(4, 4+len(vocab)))) 
         id2token = [gl.PAD_TOKEN, gl.UNK_TOKEN, gl.SOS_TOKEN, gl.EOS_TOKEN] + id2token
 
         token2id[gl.PAD_TOKEN] = gl.PAD_IDX 
@@ -146,10 +154,9 @@ class NgramLM:
     
     def get_ngram_count(self, ngram, vocab=None, count=None, trie=True):
         if trie:
-            import pdb; pdb.set_trace()
             nt = self.convert_to_trie(ngram)
             if nt in self.trie_ngram:
-                return self.trie_ngram[ngram]
+                return self.trie_ngram[nt]
             else:
                 return 0
         else:
@@ -165,9 +172,9 @@ class NgramLM:
 
     def get_ngram_prob(self, ngram, trie=True):
         if trie:
-            import pdb; pdb.set_trace()
             c = self.get_ngram_count(ngram)
             nt_prefix = self.convert_to_trie(ngram[:-1])
+            all_counts = 0
             if nt_prefix in self.trie_ngram:
                 prefixes = self.trie_ngram.items(prefix=nt_prefix)
                 all_counts = sum([prefixes[i][1] for i in range(len(prefixes))])
@@ -188,74 +195,116 @@ class NgramLM:
             else:
                 return 0
 
-    def get_ngram_prob_additive_smoothing(self, ngram, delta=0.5):
-        c = self.get_ngram_count(ngram) + delta*1
-        all_counts = 0
-        for t in self.vocab_ngram:
-            if t[:-1] == ngram[:-1]:
-    #             print(t, get_ngram_count(self, t))
-                all_counts += self.get_ngram_count(t)
-        all_counts += delta*len(self.vocabulary)
-        if all_counts > 0:
-            return c / all_counts
+    def get_ngram_prob_additive_smoothing(self, ngram, delta=0.5, trie=True):
+        if trie:
+            c = self.get_ngram_count(ngram) + delta*1
+            nt_prefix=  self.convert_to_trie(ngram[:-1])
+            all_counts = 0
+            if nt_prefix in self.trie_ngram:
+                prefixes = self.trie_ngram.items(prefix=nt_prefix)
+                all_counts = sum([prefixes[i][1] for i in range(len(prefixes))])
+            all_counts += delta*len(self.vocabulary)
+            if all_counts > 0:
+                return c / all_counts
+            else:
+                return 0
+            
         else:
-            return 0
+            c = self.get_ngram_count(ngram) + delta*1
+            all_counts = 0
+            for t in self.vocab_ngram:
+                if t[:-1] == ngram[:-1]:
+        #             print(t, get_ngram_count(self, t))
+                    all_counts += self.get_ngram_count(t)
+            all_counts += delta*len(self.vocabulary)
+            if all_counts > 0:
+                return c / all_counts
+            else:
+                return 0
 
-    def get_ngram_prob_add_one_smoothing(self, ngram):
-        c = self.get_ngram_count(ngram) + 1
-        all_counts = 0
-        for t in self.vocab_ngram:
-            if t[:-1] == ngram[:-1]:
-    #             print(t, self.get_ngram_count(t))
-                all_counts += self.get_ngram_count(t)
-        all_counts += len(self.vocabulary)
-        if all_counts > 0:
-            return c / all_counts
+    def get_ngram_prob_add_one_smoothing(self, ngram, trie=True):
+        return self.get_ngram_prob_additive_smoothing(ngram, delta=1, trie=trie)
+
+    # TODO: implement this using tries
+    def get_ngram_prob_interpolation_smoothing(self, ngram, alpha=0.8, trie=True):
+        if trie: 
+            c = self.get_ngram_count(ngram)
+            prefix=  self.convert_to_trie(ngram[:-1])
+            all_counts = 0
+            if prefix in self.trie_ngram:
+                prefixes = self.trie_ngram.items(prefix=prefix)
+                all_counts = sum([prefixes[i][1] for i in range(len(prefixes))])
+            if all_counts > 0:
+                prob_ngram = c / all_conts
+            else:
+                prob_ngram = 0
+            
+            prev_ngram = tuple(list(ngram[1:]))
+            prev_c = self.get_ngram_count(prev_ngram, self.trie_prev_ngram)
+            prev_prefix=  self.convert_to_trie(prev_ngram[:-1])
+            prev_all_counts = 0
+            if prev_prefix in self.trie_prev_ngram:
+                prev_prefixes = self.trie_prev_ngram.items(prefix=prev_prefix)
+                prev_all_counts = sum([prev_prefixes[i][1] for i in range(len(prev_prefixes))])
+            if prev_all_counts > 0:
+                prob_prev_ngram = prev_c  / prev_all_counts
+            else:
+                prob_prev_ngram = 0
+                
+            return alpha*(prob_ngram) + (1-alpha)*prob_prev_ngram
+
         else:
-            return 0
+            c = self.get_ngram_count(ngram, self.vocab_ngram, self.count_ngram)
+            all_counts = 0
+            for t in self.vocab_ngram:
+                if t[:-1] == ngram[:-1]:
+        #             print(t, get_ngram_count(t, vocab, count))
+                    all_counts += self.get_ngram_count(t, self.vocab_ngram, self.count_ngram)
+            if all_counts > 0:
+                prob_ngram = c / all_counts
+            else:
+                prob_ngram = 0
 
-    def get_ngram_prob_interpolation_smoothing(self, ngram, alpha=0.8):
-        c = self.get_ngram_count(ngram, self.vocab_ngram, self.count_ngram)
-        all_counts = 0
-        for t in self.vocab_ngram:
-            if t[:-1] == ngram[:-1]:
-    #             print(t, get_ngram_count(t, vocab, count))
-                all_counts += self.get_ngram_count(t, self.vocab_ngram, self.count_ngram)
-        if all_counts > 0:
-            prob_ngram = c / all_counts
-        else:
-            prob_ngram = 0
-
-        prev_ngram = tuple(list(ngram[1:]))
-        prev_c = self.get_ngram_count(prev_ngram, self.vocab_prev_ngram, self.count_prev_ngram)
-    #     print(prev_c)
-        prev_all_counts = 0
-        for prev_t in self.vocab_prev_ngram:
-            if prev_t[:-1] == prev_ngram[:-1]:
-    #             print(prev_t, self.get_ngram_count(prev_t, self.vocab_prev_ngram, self.count_prev_ngram))
-                prev_all_counts += self.get_ngram_count(prev_t, self.vocab_prev_ngram, self.count_prev_ngram)
-        if prev_all_counts > 0:
-            prob_prev_ngram = prev_c / prev_all_counts
-        else:
-            0
-        return alpha*(prob_ngram) + (1-alpha)*prob_prev_ngram
-
+            prev_ngram = tuple(list(ngram[1:]))
+            prev_c = self.get_ngram_count(prev_ngram, self.vocab_prev_ngram, self.count_prev_ngram)
+        #     print(prev_c)
+            prev_all_counts = 0
+            for prev_t in self.vocab_prev_ngram:
+                if prev_t[:-1] == prev_ngram[:-1]:
+        #             print(prev_t, self.get_ngram_count(prev_t, self.vocab_prev_ngram, self.count_prev_ngram))
+                    prev_all_counts += self.get_ngram_count(prev_t, self.vocab_prev_ngram, self.count_prev_ngram)
+            if prev_all_counts > 0:
+                prob_prev_ngram = prev_c / prev_all_counts
+            else:
+                prob_prev_ngram = 0
+            return alpha*(prob_ngram) + (1-alpha)*prob_prev_ngram
 
     def get_unigram_count(self, r):
-        return np.sum([1 for i in range(len(self.vocab_unigram)) if self.count_unigram[i] == r])
+        return np.sum([1 for t in self.trie_unigram if self.trie_unigram[t] == r])                
+#         return np.sum([1 for i in range(len(self.vocab_unigram)) if self.count_unigram[i] == r])
 
     def get_bigram_count(self, r):
-        return np.sum([1 for i in range(len(self.vocab_bigram)) if self.count_bigram[i] == r])
+        return np.sum([1 for t in self.trie_bigram if self.trie_bigram[t] == r])
+#         return np.sum([1 for i in range(len(self.vocab_bigram)) if self.count_bigram[i] == r])
 
-    def get_biunigram_count(self, r, token):
-        cc = 0
-        for other_token in self.vocab_unigram:
-            bigram = tuple([token] + [other_token])
-            if bigram in self.vocab_bigram:
-                bigram_idx = self.vocab_bigram.index(bigram) 
-                if self.count_bigram[bigram_idx] == r:
-                    cc += 1
-        return cc
+    def get_biunigram_count(self, r, token, trie=True):
+        if trie:
+            counts = 0
+            prefix = self.convert_to_trie(token)   # token needs to be a single token 
+            if prefix in self.trie_unigram:
+                prefixes = self.trie_bigram.items(prefix=prefix)
+                counts = sum([1 for i in range(len(prefixes)) if prefixes[i][1] == r ]) 
+            return counts
+        
+        else:
+            cc = 0
+            for other_token in self.vocab_unigram:
+                bigram = tuple([token] + [other_token])
+                if bigram in self.vocab_bigram:
+                    bigram_idx = self.vocab_bigram.index(bigram) 
+                    if self.count_bigram[bigram_idx] == r:
+                        cc += 1
+            return cc
 
     def get_b_bi(self):
         bbi = self.get_bigram_count(1) / (self.get_bigram_count(1) + 2 * self.get_bigram_count(2))
@@ -267,12 +316,18 @@ class NgramLM:
 
     def get_p_uni(self, w):
         N = self.num_all_tokens
-
-        if w in self.vocab_unigram:
-            w_idx = self.vocab_unigram.index(w)
-            N_w = self.count_unigram[w_idx]
+        
+        uni_w = self.convert_to_trie(w)
+        if uni_w in self.trie_unigram:
+            N_w = self.trie_unigram[uni_w]
         else:
             N_w = 0
+
+#         if w in self.vocab_unigram:
+#             w_idx = self.vocab_unigram.index(w)
+#             N_w = self.count_unigram[w_idx]
+#         else:
+#             N_w = 0
 
         b_uni = self.get_b_uni()
 
@@ -284,17 +339,29 @@ class NgramLM:
         return p_uni
 
     def get_p_bi(self, w, v):   # w given v
-        if tuple([v] + [w]) in self.vocab_bigram:
-            vw_idx = self.vocab_bigram.index(tuple([v] + [w]))
-            N_vw = self.count_bigram[vw_idx]
+        bigram = self.convert_to_trie(tuple([v] + [w]))
+        if bigram in self.trie_bigram:
+            N_vw = self.trie_bigram[bigram]
         else:
             N_vw = 0
 
-        if tuple([v]) in self.vocab_unigram:
-            v_idx = self.vocab_unigram.index(tuple([v]))
-            N_v = self.count_unigram[v_idx]
+        uni_v = self.convert_to_trie(tuple([v]))
+        if uni_v in self.trie_unigram:
+            N_v = self.trie_unigram[uni_v]
         else:
             N_v = 0  
+            
+#         if tuple([v] + [w]) in self.vocab_bigram:
+#             vw_idx = self.vocab_bigram.index(tuple([v] + [w]))
+#             N_vw = self.count_bigram[vw_idx]
+#         else:
+#             N_vw = 0
+
+#         if tuple([v]) in self.vocab_unigram:
+#             v_idx = self.vocab_unigram.index(tuple([v]))
+#             N_v = self.count_unigram[v_idx]
+#         else:
+#             N_v = 0  
 
         b_bi = self.get_b_bi()
         b_uni = self.get_b_uni()
@@ -310,40 +377,72 @@ class NgramLM:
 
         return p_bi
 
-    def get_prob_sentence(self, sentence):
-        padded_sentence = self.pad_sentences(self.n, sentence=sentence)  # needs a list
-    #     print(padded_sentence)
-        ngram_sentence = self.find_ngrams(self.n, sentence=padded_sentence)[0] # only one element in list
-    #     print(ngram_sentence)
-        prob = 1
-        for ngram in ngram_sentence:
-            prob_ngram = self.get_ngram_prob(ngram)
-    #         print(ngram, prob_ngram)
-            prob *= prob_ngram
-        return prob
+    # TODO:
+    def get_prob_sentence(self, sentence, trie=True):
+        if trie:
+            padded_sentence = self.pad_sentences(self.n, sentence=sentence)  # needs a list
+        #     print(padded_sentence)
+            ngram_sentence = self.find_ngrams(self.n, sentence=padded_sentence)[0] # only one element in list
+        #     print(ngram_sentence)
+            prob = 1
+            for ngram in ngram_sentence:
+                prob_ngram = self.get_ngram_prob(ngram)
+        #         print(ngram, prob_ngram)
+                prob *= prob_ngram
+            return prob
+        
+        else:
+            padded_sentence = self.pad_sentences(self.n, sentence=sentence)  # needs a list
+        #     print(padded_sentence)
+            ngram_sentence = self.find_ngrams(self.n, sentence=padded_sentence)[0] # only one element in list
+        #     print(ngram_sentence)
+            prob = 1
+            for ngram in ngram_sentence:
+                prob_ngram = self.get_ngram_prob(ngram)
+        #         print(ngram, prob_ngram)
+                prob *= prob_ngram
+            return prob
 
-    def get_prob_distr_ngram(self, prev_tokens):
-        pd = [0 for v in self.vocabulary]
-        for idx, token in enumerate(self.vocabulary):
-    #         print("token: ", token)
-    #         print("prev ngram: ", prev_tokens)
-    #         print("both: ", tuple(list(prev_tokens) + [token]))
-    #         print("")
-            token_ngram = tuple(list(prev_tokens) + [token])
-            pd[idx] = self.get_ngram_prob(token_ngram)
-    #         if pd[idx] > 0 and print_nonzero_probs:
-    #             print(token_ngram, " ", pd[idx])
-        return pd
+    def get_prob_distr_ngram(self, prev_tokens, trie=True):
+        if trie:
+            pd = [0 for v in self.vocabulary]
+            nt_prefix = self.convert_to_trie(prev_tokens)
+            if nt_prefix in self.trie_ngram:
+                prefixed_ngrams = self.trie_ngram.items(prefix=nt_prefix)  # get all ngrams with given prefix
+                for ngram in prefixed_ngrams:
+                    suffix = tuple([ngram[0].split('/')[-1]])      # get the suffix of this ngram
+                    idx_suffix = self.token2id_unigram[suffix]   # get the idx in the vocabulary of this suffix token
+                    pd[idx_suffix] = ngram[1]    # count of this prefix appearances 
+            if sum(pd) > 0:
+                return [p/sum(pd) for p in pd]
+            else:
+                return pd
+
+        else:
+            pd = [0 for v in self.vocabulary]
+            for idx, token in enumerate(self.vocabulary):
+        #         print("token: ", token)
+        #         print("prev ngram: ", prev_tokens)
+        #         print("both: ", tuple(list(prev_tokens) + [token]))
+        #         print("")
+                token_ngram = tuple(list(prev_tokens) + [token])
+                pd[idx] = self.get_ngram_prob(token_ngram)
+        #         if pd[idx] > 0 and print_nonzero_probs:
+        #             print(token_ngram, " ", pd[idx])
+            return pd
 
     def sample_from_pd(self, prev_tokens):
         pd = self.get_prob_distr_ngram(prev_tokens)
-        idx_next_token = np.random.choice(len(self.vocabulary), 1, p=pd)[0]
+        if sum(pd) > 0:
+            idx_next_token = np.random.choice(len(self.vocabulary), 1, p=pd)[0]
+        else:
+            idx_next_token = np.random.choice(len(self.vocabulary), 1)[0]
         return self.vocabulary[idx_next_token]
 
-
+    # TODO: generate sentence given context
     def generate_sentence(self, num_tokens):
         sentence = []
-        prev_tokens = tuple(gl.SOS_TOKEN * (self.n - 1))
+        prev_tokens = tuple([gl.SOS_TOKEN] * (self.n - 1))
     #     print(prev_tokens)
         for i in range(num_tokens):
             next_token = self.sample_from_pd(prev_tokens)
@@ -359,7 +458,8 @@ class NgramLM:
         ll = 0
         num_tokens = 0
         for s in (test_sentences):
-            ll += self.get_prob_sentence([s])
+            prob = self.get_prob_sentence([s])
+            ll += np.log(prob + sys.float_info.min)
             num_tokens += len(s) + 1
         ppl = np.exp(-ll/num_tokens)
         return ppl
