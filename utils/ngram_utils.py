@@ -122,6 +122,9 @@ class NgramLM:
     
     def convert_to_trie(self, x):
         return '/'.join(x) 
+
+    def convert_to_ngram(self, x):
+        return tuple(x.split('/'))
     
     def make_trie(self, n=None):
         if n == None:
@@ -159,27 +162,27 @@ class NgramLM:
         else:
             return 0
         
-        
     def get_ngram_prob(self, ngram):
         c = self.get_ngram_count(ngram)
         nt_prefix = self.convert_to_trie(ngram[:-1])
         all_counts = 0
-        if nt_prefix in self.trie_ngram:
+        if self.trie_ngram.has_subtrie(nt_prefix):
             prefixes = self.trie_ngram.items(prefix=nt_prefix)
+#             print(nt_prefix, prefixes, "\n")
             all_counts = sum([prefixes[i][1] for i in range(len(prefixes))])
         if all_counts > 0:
             return c / all_counts
-        else:
+        else: 
             return 0
 
     def get_ngram_prob_additive_smoothing(self, ngram, delta=0.5):
         c = self.get_ngram_count(ngram) + delta*1
         nt_prefix=  self.convert_to_trie(ngram[:-1])
         all_counts = 0
-        if nt_prefix in self.trie_ngram:
+        if self.trie_ngram.has_subtrie(nt_prefix):  # check if prefix exists in trie
             prefixes = self.trie_ngram.items(prefix=nt_prefix)
             all_counts = sum([prefixes[i][1] for i in range(len(prefixes))])
-        all_counts += delta*len(self.vocabulary)
+        all_counts += delta*len(self.id2token_unigram)
         if all_counts > 0:
             return c / all_counts
         else:
@@ -192,11 +195,11 @@ class NgramLM:
         c = self.get_ngram_count(ngram, trie=self.trie_ngram)
         prefix=  self.convert_to_trie(ngram[:-1])
         all_counts = 0
-        if prefix in self.trie_ngram:
+        if self.trie_ngram.has_subtrie(prefix):
             prefixes = self.trie_ngram.items(prefix=prefix)
             all_counts = sum([prefixes[i][1] for i in range(len(prefixes))])
         if all_counts > 0:
-            prob_ngram = c / all_conts
+            prob_ngram = c / all_counts
         else:
             prob_ngram = 0
 
@@ -223,7 +226,7 @@ class NgramLM:
     def get_biunigram_count(self, r, token):
         counts = 0
         prefix = self.convert_to_trie(token)   # token needs to be a single token 
-        if prefix in self.trie_unigram:
+        if self.trie_bigram.has_subtrie(prefix):
             prefixes = self.trie_bigram.items(prefix=prefix)
             counts = sum([1 for i in range(len(prefixes)) if prefixes[i][1] == r ]) 
         return counts
@@ -248,7 +251,7 @@ class NgramLM:
 
         b_uni = self.get_b_uni()
 
-        W = len(self.vocabulary)
+        W = len(self.id2token_unigram)
         N_0 = self.get_unigram_count(0)
         
         p_uni = max((N_w - b_uni / N), 0) + b_uni * (W - N_0) / N * 1 / W
@@ -273,7 +276,7 @@ class NgramLM:
 
         p_uni = self.get_p_uni(tuple([w]))
 
-        W = len(self.vocabulary)
+        W = len(self.id2token_unigram)
         N_0 = self.get_biunigram_count(0, v)
 
 
@@ -290,28 +293,29 @@ class NgramLM:
             prob_ngram = self.get_ngram_prob(ngram)
             prob *= prob_ngram
         return prob
-        
-    def get_prob_distr_ngram(self, prev_tokens):
-        pd = [0 for v in self.vocabulary]
+    
+    def get_prob_distr_ngram(self, prev_tokens, smoothing=None):
+        pd = [0 for v in self.id2token_unigram]
         nt_prefix = self.convert_to_trie(prev_tokens)
-        if nt_prefix in self.trie_ngram:
-            prefixed_ngrams = self.trie_ngram.items(prefix=nt_prefix)  # get all ngrams with given prefix
+        if self.trie_ngram.has_subtrie(nt_prefix):
+            prefixed_ngrams = self.trie_ngram.items(prefix=nt_prefix)
             for ngram in prefixed_ngrams:
                 suffix = tuple([ngram[0].split('/')[-1]])      # get the suffix of this ngram
-                idx_suffix = self.token2id_unigram[suffix]   # get the idx in the vocabulary of this suffix token
-                pd[idx_suffix] = ngram[1]    # count of this prefix appearances 
-        if sum(pd) > 0:
-            return [p/sum(pd) for p in pd]
-        else:
-            return pd
+                if suffix in self.token2id_unigram:
+                    idx_suffix = self.token2id_unigram[suffix]     # get the idx in the vocabulary of this suffix token
+                else:
+                    idx_suffix = self.token2id_unigram[gl.UNK_TOKEN]
+                pd[idx_suffix] = self.get_ngram_prob(self.convert_to_ngram(ngram[0]))
+#                 print(self.id2token_unigram[idx_suffix][0], pd[idx_suffix])
+        return pd        
         
     def sample_from_pd(self, prev_tokens):
         pd = self.get_prob_distr_ngram(prev_tokens)
         if sum(pd) > 0:
-            idx_next_token = np.random.choice(len(self.vocabulary), 1, p=pd)[0]
+            idx_next_token = np.random.choice(len(self.id2token_unigram), 1, p=pd)[0]
         else:
-            idx_next_token = np.random.choice(len(self.vocabulary), 1)[0]
-        return self.vocabulary[idx_next_token]
+            idx_next_token = np.random.choice(len(self.id2token_unigram), 1)[0]
+        return self.id2token_unigram[idx_next_token][0]
 
     def generate_sentence(self, num_tokens, context=None):
         sentence = []
@@ -321,7 +325,7 @@ class NgramLM:
             if len(context) >= self.n - 1:
                 prev_tokens = context[-(self.n - 1):]
             else:
-                prev_tokens = tuple([gl.SOS_TOKEN] * (self.n - 1 - len(context)) + [context])
+                prev_tokens = tuple([gl.SOS_TOKEN] * (self.n - 1 - len(context)) + [c for c in context])
         
         for i in range(num_tokens):
             next_token = self.sample_from_pd(prev_tokens)
