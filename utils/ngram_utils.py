@@ -190,7 +190,7 @@ class NgramLM:
             return self.get_ngram_prob_interpolation_smoothing(ngram, alpha=self.alpha)
             
         elif self.smoothing == 'discounting':
-            return self.get_p_bi(ngram[-1], [ngram[:-1])
+            return self.get_p_bi(ngram[-1], ngram[:-1])
 
     def get_ngram_prob_additive_smoothing(self, ngram, delta=0.5):
         c = self.get_ngram_count(ngram) + delta*1
@@ -276,7 +276,6 @@ class NgramLM:
         return p_uni
 
     def get_p_bi(self, w, v):   # w given v
-        import pdb; pdb.set_trace()
         bigram = self.convert_to_trie(tuple([v] + [w]))
         if bigram in self.trie_bigram:
             N_vw = self.trie_bigram[bigram]
