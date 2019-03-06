@@ -7,6 +7,7 @@ from operator import itemgetter
 import global_variables as gl
 
 
+
 class AmazonDataset(Dataset):
     def __init__(self, data_list, max_inp_length=None, use_cuda=True):
         """
@@ -55,3 +56,5 @@ def batchify(batch):
     target_batch = torch.stack(target_list, 0)
 
     return input_batch, target_batch
+
+

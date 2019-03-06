@@ -18,36 +18,47 @@ import altair
 import pygtrie 
 import global_variables as gl
 import sys
-
+import spacy
 
 # Load English tokenizer, tagger, parser, NER and word vectors
 tokenizer = spacy.load('en_core_web_sm')               
-punctuations = string.punctuation
-# punctuations = '"#$%&\'()*+,-/:;<=>@[\\]^_`{|}~' 
-TAG_RE = re.compile(r'<[^>]+>') # get rid off HTML tags from the data
+punctuations = '"#$%&\()*+-/:;<=>@[\\]^_`{|}~'   # kept ' , . ? ! 
 
-def remove_tags(text):
-    return TAG_RE.sub('', text)
+# punctuations = string.punctuation
+# TAG_RE = re.compile(r'<[^>]+>') # get rid off HTML tags from the data
+# def remove_tags(text):
+#     return TAG_RE.sub('', text)
 
-def lower_case(parsed):
-    return [token.text.lower() for token in parsed] #and (token.is_stop is False)]
+# def lower_case(parsed):
+#     return [token.text.lower() for token in parsed] #and (token.is_stop is False)]
 
-def remove_punc(parsed):
-    return [token.text for token in parsed if (token.text not in punctuations)]
+# def remove_punc(parsed):
+#     return [token.text for token in parsed if (token.text not in punctuations)]
 
 def lower_case_remove_punc(parsed):
-    return [token.text.lower() for token in parsed if (token.text not in punctuations)] #and (token.is_stop is False)]
+    return [token.text.lower() for token in parsed if (token.text not in punctuations)]
 
-def tokenize_dataset(dataset):
+def split_into_sentences(data):
+    nlp = spacy.lang.en.English()
+    nlp.add_pipe(nlp.create_pipe('sentencizer'))
+    sentences = []
+    for text in data:
+        doc = nlp(text)
+        for sent in doc.sents:
+            sentences.append(sent)
+    return sentences
+
+def tokenize_dataset(dataset, batch_size=64):
    # tokenize each sentence -- each tokenized sentence will be an element in token_dataset
     token_dataset = []
     # tokenize all words -- each token will be an item in all_tokens (in the order given by the list of sentences)
     all_tokens = []     # all the tokens -- 
-
-    for sample in tqdm(tokenizer.pipe(dataset, disable=['parser', 'tagger', 'ner'], batch_size=512, n_threads=1)):
-#         tokens = lower_case_remove_punc(sample)
-        tokens = lower_case(sample)       # make words lower case
-#         tokens = remove_punct(tokens)     # remove punctuation
+    
+    import pdb; pdb.set_trace()
+    sentence_dataset = split_into_sentences(dataset) 
+    for sample in _tqdm(tokenizer.pipe(sentence_dataset, disable=['parser', 'tagger', 'ner'], batch_size=batch_size, n_threads=1)):
+        import pdb; pdb.set_trace()
+        tokens = lower_case_remove_punc(sample)        
         token_dataset.append(tokens)    
         all_tokens += tokens
 
