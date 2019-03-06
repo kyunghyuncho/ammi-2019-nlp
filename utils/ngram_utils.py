@@ -54,10 +54,14 @@ def tokenize_dataset(dataset):
     return token_dataset, all_tokens
     
 class NgramLM:
-    def __init__(self, tokenized_data, all_tokens, n=3, frac_vocab=0.9):
+    def __init__(self, tokenized_data, all_tokens, n=3, frac_vocab=0.9, \
+                smoothing=None, delta=0.5, alpha=0.8):
 
         self.n = n
         self.frac_vocab = frac_vocab
+        self.smoothing = smoothing
+        self.alpha = alpha
+        self.delta = delta
         self.vocabulary = list(set(all_tokens))
         self.num_all_tokens = len(all_tokens)
         self.raw_data = tokenized_data
@@ -163,17 +167,30 @@ class NgramLM:
             return 0
         
     def get_ngram_prob(self, ngram):
-        c = self.get_ngram_count(ngram)
-        nt_prefix = self.convert_to_trie(ngram[:-1])
-        all_counts = 0
-        if self.trie_ngram.has_subtrie(nt_prefix):
-            prefixes = self.trie_ngram.items(prefix=nt_prefix)
-#             print(nt_prefix, prefixes, "\n")
-            all_counts = sum([prefixes[i][1] for i in range(len(prefixes))])
-        if all_counts > 0:
-            return c / all_counts
-        else: 
-            return 0
+        if self.smoothing == None:
+            c = self.get_ngram_count(ngram)
+            nt_prefix = self.convert_to_trie(ngram[:-1])
+            all_counts = 0
+            if self.trie_ngram.has_subtrie(nt_prefix):
+                prefixes = self.trie_ngram.items(prefix=nt_prefix)
+    #             print(nt_prefix, prefixes, "\n")
+                all_counts = sum([prefixes[i][1] for i in range(len(prefixes))])
+            if all_counts > 0:
+                return c / all_counts
+            else: 
+                return 0
+            
+        elif self.smoothing == 'additive':
+            return self.get_ngram_prob_additive_smoothing(ngram, delta=self.delta)
+        
+        elif self.smoothing == 'add-one':
+            return self.get_ngram_prob_add_one_smoothing(ngram)
+        
+        elif self.smoothing == 'interpolation':
+            return self.get_ngram_prob_interpolation_smoothing(ngram, alpha=self.alpha)
+            
+        elif self.smoothing == 'discounting':
+            return self.get_p_bi(ngram[-1], [ngram[:-1])
 
     def get_ngram_prob_additive_smoothing(self, ngram, delta=0.5):
         c = self.get_ngram_count(ngram) + delta*1
@@ -247,7 +264,7 @@ class NgramLM:
         if uni_w in self.trie_unigram:
             N_w = self.trie_unigram[uni_w]
         else:
-            N_w = 0
+            N_w = sys.float_info.min
 
         b_uni = self.get_b_uni()
 
@@ -259,17 +276,18 @@ class NgramLM:
         return p_uni
 
     def get_p_bi(self, w, v):   # w given v
+        import pdb; pdb.set_trace()
         bigram = self.convert_to_trie(tuple([v] + [w]))
         if bigram in self.trie_bigram:
             N_vw = self.trie_bigram[bigram]
         else:
-            N_vw = 0
+            N_vw = sys.float_info.min
 
         uni_v = self.convert_to_trie(tuple([v]))
         if uni_v in self.trie_unigram:
             N_v = self.trie_unigram[uni_v]
         else:
-            N_v = 0  
+            N_v = sys.float_info.min
             
         b_bi = self.get_b_bi()
         b_uni = self.get_b_uni()
@@ -307,7 +325,10 @@ class NgramLM:
                     idx_suffix = self.token2id_unigram[gl.UNK_TOKEN]
                 pd[idx_suffix] = self.get_ngram_prob(self.convert_to_ngram(ngram[0]))
 #                 print(self.id2token_unigram[idx_suffix][0], pd[idx_suffix])
-        return pd        
+        if np.sum(pd) > 0:
+            return [p/sum(pd) for p in pd]
+        else:
+            return pd
         
     def sample_from_pd(self, prev_tokens):
         pd = self.get_prob_distr_ngram(prev_tokens)
