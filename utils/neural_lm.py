@@ -113,7 +113,7 @@ class seq2seq(nn.Module):
     def v2t(self, vector):
         return [self.id2token[i] for i in vector]
         
-    def train_step(self, xs, ys):
+    def train_step(self, xs, ys, eval_mode=True):
         """Train model to produce ys given xs.
         :param batch: parlai.core.torch_agent.Batch, contains tensorized
                       version of observations.
@@ -126,14 +126,18 @@ class seq2seq(nn.Module):
         ys = ys.to(self.device)
 
         self.zero_grad()
-        self.encoder.train()
-        self.decoder.train()
-    
+        if not eval_mode:
+            self.encoder.train()
+            self.decoder.train()
+        else:
+            self.encoder.eval()
+            self.decoder.eval()
+            
         bow_output = self.encoder(xs)
         decoder_output = self.decoder(bow_output)
             
         loss = self.criterion(decoder_output, ys.view(-1))
-
+        
         loss.backward()
         self.update_params()
 
@@ -165,7 +169,8 @@ class seq2seq(nn.Module):
         predictions = []
         done = [False for _ in range(bsz)]
         total_done = 0
-        scores = torch.ones(bsz)
+        scores = torch.zeros(bsz)
+        score_counts = 0
         
         if score_only:
             num_predictions = xs.size(1)
@@ -175,9 +180,11 @@ class seq2seq(nn.Module):
         for i in range(num_predictions):
             decoder_input = self.encoder(encoder_input)
             decoder_output = self.decoder(decoder_input)
+            
             _max_score, next_token = decoder_output.max(1)
             
-            scores = scores * _max_score
+            scores = scores + _max_score
+            score_counts += 1
             
             if score_only:   # replace the next token with the one in the input data
                 next_token = torch.index_select(xs, 1, torch.tensor([i])).squeeze(1)
@@ -201,5 +208,37 @@ class seq2seq(nn.Module):
         
         predictions = [self.v2t(p) for p in predictions]
         predictions = [[p[i][0] for p in predictions] for i in range(bsz)]
+        scores = scores / score_counts
     
         return predictions, scores
+    
+    def score(data):
+        generated, score = self.eval_step(data, score_only=score_only)  
+        sentences_lst = []
+        scores_lst = []
+        for k in range(xs.size(0)):
+            context = [self.v2t(d) for d in data][k]
+            context = [c[0] for c in context]
+            
+            sentences_lst.append(' '.join(context))
+            scores_lst.append(math.exp(score[k]))
+
+        return sentences_lst, scores_lst
+    
+    def generate(self, data, use_context=False):
+        generated, scores = self.eval_step(data, use_context=use_context)  
+        contexts_lst = [] 
+        scores_lst = []
+        generated_lst = []
+        
+        for k in range(xs.size(0)):
+            if use_context:
+                context = [self.v2t(d) for d in data][k]
+                context = [c[0] for c in context]
+                print("Context: ", ' '.join(context))  # print only one generated sentence out of the bsz 
+            
+            generated_str = [' '.join(g) for g in generated] # convert them to more readable strings     
+            print("Generated ", generated_str[k])  # print only one generated sentence out of the bsz 
+            
+            print("Score:    ", math.exp(scores[k]))  # print only one generated sentence out of the bsz 
+            print("")
