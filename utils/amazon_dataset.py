@@ -6,8 +6,6 @@ _tqdm = tqdm_notebook
 from operator import itemgetter 
 import global_variables as gl
 
-
-
 class AmazonDataset(Dataset):
     def __init__(self, data_list, max_inp_length=None, use_cuda=True):
         """
@@ -17,14 +15,13 @@ class AmazonDataset(Dataset):
         self.max_len = max_inp_length
         self.data_tensors = []
         device = torch.device("cuda" if (torch.cuda.is_available() and use_cuda) else "cpu")
-        for (i, t) in tqdm(self.data):
-            self.data_tensors.append((torch.LongTensor(i[:self.max_len]).to(device), \
-                                        torch.LongTensor([t]).to(device)))
+        for d in tqdm(self.data):
+            self.data_tensors.append((torch.LongTensor(d[:self.max_len]).to(device)))
                 
     def __getitem__(self, key):
-        (inp, tgt) = self.data_tensors[key]
+        inp = self.data_tensors[key]
         
-        return inp, tgt, len(inp)
+        return inp#, len(inp)
 
     def __len__(self):
         return len(self.data)
@@ -46,15 +43,14 @@ def pad(tensor, length, dim=0, pad=0):
         return tensor
 
 def batchify(batch):
-    maxlen = max(batch, key = itemgetter(2))[-1]
-    batch_list = []
-    target_list = []
+    data_list = []
+    labels_list = []
     for b in batch:
-        batch_list.append(pad(b[0], maxlen, dim=0, pad=gl.PAD_IDX))
-        target_list.append(b[1])
-    input_batch = torch.stack(batch_list, 0)
-    target_batch = torch.stack(target_list, 0)
+        data_list.append(b[0])
+        labels_list.append(b[1])
+    data_batch = torch.stack(data_list, 0)
+    labels_batch = torch.stack(labels_list, 0)
 
-    return input_batch, target_batch
+    return  data_batch, labels_batch
 
 

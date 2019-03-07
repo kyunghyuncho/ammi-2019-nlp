@@ -45,24 +45,60 @@ def split_into_sentences(data):
     for text in data:
         doc = nlp(text)
         for sent in doc.sents:
-            sentences.append(sent)
+            sentences.append(sent.string)
     return sentences
 
-def tokenize_dataset(dataset, batch_size=64):
+def tokenize_dataset(dataset, batch_size=1024):
    # tokenize each sentence -- each tokenized sentence will be an element in token_dataset
     token_dataset = []
     # tokenize all words -- each token will be an item in all_tokens (in the order given by the list of sentences)
     all_tokens = []     # all the tokens -- 
     
-    import pdb; pdb.set_trace()
+#     doc = nlp(raw_text)
+#     sentences = [sent.string.strip() for sent in doc.sents]
+
     sentence_dataset = split_into_sentences(dataset) 
     for sample in _tqdm(tokenizer.pipe(sentence_dataset, disable=['parser', 'tagger', 'ner'], batch_size=batch_size, n_threads=1)):
-        import pdb; pdb.set_trace()
         tokens = lower_case_remove_punc(sample)        
         token_dataset.append(tokens)    
         all_tokens += tokens
 
     return token_dataset, all_tokens
+
+def pad_dataset(data, n=3):        
+    result_list = []
+    for l in data:
+        padded = [gl.SOS_TOKEN for i in range(n - 1)] + l + [gl.EOS_TOKEN for i in range(n - 1)]
+        result_list.append(padded)
+    return result_list
+    
+def get_vocab(data, frac_vocab=0.9):
+    all_train_tokens = list(mit.flatten(data))
+    counted_tokens = Counter(all_train_tokens)
+    max_vocab_size = int(frac_vocab * len(counted_tokens))
+    vocab, _ = zip(*counted_tokens.most_common(max_vocab_size))
+    
+    return vocab
+
+def get_dict(vocab):
+    id2token = list(vocab)
+    token2id = dict(zip(vocab, range(4, 4+len(vocab)))) 
+    id2token = [gl.PAD_TOKEN, gl.UNK_TOKEN, gl.SOS_TOKEN, gl.EOS_TOKEN] + id2token
+
+    token2id[gl.PAD_TOKEN] = gl.PAD_IDX 
+    token2id[gl.UNK_TOKEN] = gl.UNK_IDX
+    token2id[gl.SOS_TOKEN] = gl.SOS_IDX 
+    token2id[gl.EOS_TOKEN] = gl.EOS_IDX
+    
+    return id2token, token2id
+
+def get_ids(data, token2id):
+    data_ids = []
+    for d in data:
+        data_ids.append([token2id[t] if t in token2id else gl.UNK_IDX for t in d])
+        
+    return data_ids
+
     
 class NgramLM:
     def __init__(self, tokenized_data, all_tokens, n=3, frac_vocab=0.9, \
