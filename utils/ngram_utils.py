@@ -349,7 +349,6 @@ class NgramLM:
         return p_bi
 
     def get_prob_sentence(self, sentence):
-        import pdb; pdb.set_trace()
         padded_sentence = self.pad_sentences(self.n, sentence=sentence)  # needs a list
         ngram_sentence = self.find_ngrams(self.n, sentence=padded_sentence)[0] # only one element in list
         prob = 1
@@ -357,6 +356,21 @@ class NgramLM:
             prob_ngram = self.get_ngram_prob(ngram)
             prob *= prob_ngram
         return prob
+    
+    def get_score_sentence(self, sentence):
+        padded_sentence = self.pad_sentences(self.n, sentence=sentence)  # needs a list
+        ngram_sentence = self.find_ngrams(self.n, sentence=padded_sentence)[0] # only one element in list
+        score = 0
+        count = 0
+        for ngram in ngram_sentence:
+            prob_ngram = self.get_ngram_prob(ngram)
+            if prob_ngram > 0:
+                score += np.log(prob_ngram)
+            else:
+                score += np.log(sys.float_info.min)    
+            count += 1
+        ppl = math.exp(-score / count)
+        return ppl
     
     def get_prob_distr_ngram(self, prev_tokens, smoothing=None):
         pd = [0 for v in self.id2token_unigram]
@@ -406,9 +420,11 @@ class NgramLM:
         num_tokens = 0
         for s in (test_sentences):
             prob = self.get_prob_sentence([s])
-            if prob > 0:
-                ll += np.log(prob) # + sys.float_info.min)
-                num_tokens += len(s) + 1
+            ll += np.log(prob + sys.float_info.min)
+            num_tokens += len(s) + 1
+#             if prob > 0:
+#                 ll += np.log(prob) # + sys.float_info.min)
+#                 num_tokens += len(s) + 1
         ppl = np.exp(-ll/num_tokens)
         return ppl
 
