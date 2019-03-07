@@ -84,7 +84,7 @@ def read_dataset(file):
 		read().strip().split('\n')
 
 	# Split every line into pairs and normalize
-	pairs = [[normalizeString(s) for s in l.split('\t')][::-1] for l in lines]
+	pairs = [[normalizeString(s) for s in l.split('\t')] for l in lines]
 	return pd.DataFrame(pairs, columns = ['source_data', 'target_data'])
 
 

@@ -121,7 +121,7 @@ class DecoderRNN(nn.Module):
         self.out = nn.Linear(hidden_size, output_size)
         self.softmax = nn.LogSoftmax(dim=2)
 
-    def forward(self, input, hidden, encoder_output):
+    def forward(self, input, hidden, encoder_output=None, xs_len = None):
         """Return encoded state.
         :param input: batch_size x 1 tensor of token indices.
         :param hidden: past (e.g. encoder) hidden state
@@ -133,13 +133,54 @@ class DecoderRNN(nn.Module):
         return scores, hidden, None
 
 
+class Attention_Module(nn.Module):
+
+    def __init__(self, hidden_dim, output_dim):
+        super(Attention_Module, self).__init__()
+        self.l1 = nn.Linear(hidden_dim, output_dim, bias=False)
+        self.l2 = nn.Linear(hidden_dim + output_dim, output_dim, bias=False)
+
+    def forward(self, hidden, encoder_outs, src_lens):
+        ''' hiddden: bsz x hidden_dim
+        encoder_outs: bsz x sq_len x encoder dim (output_dim)
+        src_lens: bsz
+
+        x: bsz x output_dim
+        attn_score: bsz x sq_len'''
+
+        x = self.l1(hidden)
+        att_score = (encoder_outs.transpose(0, 1) * x.unsqueeze(0)).sum(dim=2)
+
+        seq_mask = self.sequence_mask(src_lens, 
+                                    max_len=max(src_lens).item(), 
+                                    device = hidden.device).transpose(0, 1)
+
+
+        masked_att = seq_mask * att_score
+        masked_att[masked_att == 0] = -1e10
+        attn_scores = F.softmax(masked_att, dim=0)
+        x = (attn_scores.unsqueeze(2) * encoder_outs.transpose(0, 1)).sum(dim=0)
+        x = torch.tanh(self.l2(torch.cat((x, hidden), dim=1)))
+        return x, attn_scores
+
+    def sequence_mask(self, sequence_length, max_len=None, device = torch.device('cuda')):
+        if max_len is None:
+            max_len = sequence_length.max().item()
+        batch_size = sequence_length.size(0)
+        seq_range = torch.arange(0, max_len).long()
+        seq_range_expand = seq_range.unsqueeze(0).repeat([batch_size, 1])
+        seq_range_expand = seq_range_expand.to(device)
+        seq_length_expand = (sequence_length.unsqueeze(1)
+                             .expand_as(seq_range_expand))
+        return (seq_range_expand < seq_length_expand).float()
+
 
 class Decoder_SelfAttn(nn.Module):
     """Generates a sequence of tokens in response to context with self attention.
        Note that this is the same as previous decoder if self_attention=False"""
 
 
-    def __init__(self, output_size, hidden_size, idropout=0.5, self_attention = True, encoder_attention = False):
+    def __init__(self, output_size, hidden_size, idropout=0.5, self_attention = False, encoder_attention = False):
         super(Decoder_SelfAttn, self).__init__()
 
         self.output_size = output_size;
@@ -149,7 +190,10 @@ class Decoder_SelfAttn(nn.Module):
 
         self.hidden_size = hidden_size;
         self.embedding = nn.Embedding(output_size, hidden_size);
-        self.memory_rnn = nn.GRUCell(hidden_size, hidden_size, bias=True);
+
+        self.memory_rnn = nn.GRUCell(hidden_size + int(self.encoder_attention==True)*self.hidden_size, 
+                                    hidden_size, bias=True);
+
         self.out = nn.Linear(hidden_size, output_size)
         self.softmax = nn.LogSoftmax(dim=1)
         
@@ -157,8 +201,11 @@ class Decoder_SelfAttn(nn.Module):
             self.projector_summ = nn.Sequential(nn.Dropout(idropout),
                                                 nn.Linear(hidden_size*2, hidden_size),
                                                 nn.Dropout(idropout))
+
+        if self.encoder_attention:
+            self.encoder_attention_module = Attention_Module(self.hidden_size, self.hidden_size);
         
-    def forward(self, input, memory, encoder_output = None ):
+    def forward(self, input, memory, encoder_output = None, xs_len = None):
         memory = memory.transpose(0, 1);
         emb = self.embedding(input)
         emb = F.relu(emb)
@@ -167,14 +214,17 @@ class Decoder_SelfAttn(nn.Module):
         emb = emb.transpose(0, 1);
         return_scores = torch.empty(emb.size(0), emb.size(1), self.output_size).to(input.device)
         
-        
+        context_vec = torch.zeros([emb.size(1), self.hidden_size]).to(emb.device);
+
         for t in range(emb.size(0)):
             current_vec = emb[t];
             
             if self.self_attention:
                 selected_memory, attention0 = self.calculate_self_attention(current_vec, memory)
+
             elif self.encoder_attention:
-                selected_memory, attention0 = self.calculate_encoder_attention(current_vec, encoder_output, memory)
+                current_vec = torch.cat([current_vec, context_vec], dim = 1);
+                selected_memory = memory[:, 0, :];
                 
             if ( not (self.self_attention or self.encoder_attention)):    
                 selected_memory, attention0 = memory[:, 0, :], None;
@@ -182,7 +232,12 @@ class Decoder_SelfAttn(nn.Module):
             # recurrent
             mem_out = self.memory_rnn(current_vec, selected_memory);
     
-            scores = self.out(mem_out)
+            if self.encoder_attention:
+                context_vec, attention0 = self.encoder_attention_module(mem_out, encoder_output, xs_len);
+                scores = self.out(context_vec);
+            else:
+                scores = self.out(mem_out)
+
             scores = self.softmax(scores);
             return_scores[t] = scores
 
@@ -315,12 +370,13 @@ class seq2seq(nn.Module):
         Return estimated responses, with teacher forcing on the input sequence
         (list of strings of length batchsize).
         """
-        xs, ys = batch.text_vec, batch.label_vec
+        xs, xs_len, ys = batch.text_vec, batch.text_lengths, batch.label_vec
 
         if xs is None:
             return
         xs = xs.to(self.device)
         ys = ys.to(self.device)
+        xs_len = xs_len.to(self.device)
 
         bsz = xs.size(0)
         starts = self.START.expand(bsz, 1)  # expand to batch size
@@ -333,7 +389,6 @@ class seq2seq(nn.Module):
         self.longest_label = max(target_length, self.longest_label)
 
         encoder_output, encoder_hidden = self.encoder(xs)
-        print('enc_out shape: ', encoder_output.shape )
 
         # Teacher forcing: Feed the target as the next input
         y_in = ys.narrow(1, 0, ys.size(1) - 1)
@@ -341,7 +396,8 @@ class seq2seq(nn.Module):
 
         decoder_output, decoder_hidden, _ = self.decoder(decoder_input,
                                                       encoder_hidden, 
-                                                      encoder_output)
+                                                      encoder_output,
+                                                      xs_len)
 
 
         scores = decoder_output.view(-1, decoder_output.size(-1))
@@ -358,12 +414,13 @@ class seq2seq(nn.Module):
                       version of observations.
         Return predicted responses (list of strings of length batchsize).
         """
-        xs = batch.text_vec
+        xs, xs_len = batch.text_vec, batch.text_lengths
 
         if xs is None:
             return
 
         xs = xs.to(self.device)
+        xs_len = xs_len.to(self.device)
 
         bsz = xs.size(0)
         starts = self.START.expand(bsz, 1)  # expand to batch size
@@ -383,7 +440,8 @@ class seq2seq(nn.Module):
 
             decoder_output, decoder_hidden, _ = self.decoder(decoder_input,
                                                           decoder_hidden,
-                                                          encoder_output)
+                                                          encoder_output, 
+                                                          xs_len)
 
             _max_score, preds = decoder_output.max(2)
             predictions.append(preds)
