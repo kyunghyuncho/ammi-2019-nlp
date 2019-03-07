@@ -196,7 +196,7 @@ class AttentionLayer(nn.Module):
 class DecoderRNN(nn.Module):
     """Generates a sequence of tokens in response to context."""
 
-    def __init__(self, vocab_size, embed_size, hidden_size, num_layers, pad_idx, dropout=0):
+    def __init__(self, vocab_size, embed_size, hidden_size, num_layers, pad_idx, dropout=0, attention_flag = True):
         """Initialize encoder.
         :param vocab_size: voc size for lt
         :param embed_size: embedding size for lt
@@ -214,7 +214,7 @@ class DecoderRNN(nn.Module):
         self.gru = nn.GRU(
             self.embed_size, self.hidden_size, num_layers=self.num_layers, batch_first=True, dropout=dropout if num_layers > 1 else 0,
         )
-        self.attention = AttentionLayer(self.hidden_size)
+        self.attention = AttentionLayer(self.hidden_size) if attention_flag else None;
         self.out = nn.Linear(self.hidden_size, self.vocab_size)
 
     def forward(self, text_vec, decoder_hidden, encoder_states):
@@ -231,8 +231,12 @@ class DecoderRNN(nn.Module):
         attn_w_log = []
         for i in range(seqlen):
             decoder_output, decoder_hidden = self.gru(emb[:,i,:].unsqueeze(1), decoder_hidden)
-            decoder_output_attended, attn_weights = self.attention(decoder_output, decoder_hidden, encoder_states)
-            output.append(decoder_output_attended)
+            if self.attention is not None:
+                decoder_output_attended, attn_weights = self.attention(decoder_output, decoder_hidden, encoder_states)            
+                output.append(decoder_output_attended)
+                attn_w_log.append(attn_weights)
+            else:
+                output.append(decoder_output);
             #attn_w_log.append(attn_weights)
             
         output = torch.cat(output, dim=1).to(text_vec.device)
@@ -245,7 +249,9 @@ class seq2seq(nn.Module):
     TODO IK
 
     """
-    def __init__(self, vocab_size_encoder, vocab_size_decoder, embedding_size, encoder_type='rnn', hidden_size=64, num_layers=2, lr=0.01, pad_idx=PAD_IDX, sos_idx=SOS_IDX, eos_idx=EOS_IDX, encoder_shared_lt=False, dropout=0.0, use_cuda=True, optimizer='Adam', grad_clip=None):
+    def __init__(self, vocab_size_encoder, vocab_size_decoder, embedding_size, encoder_type='rnn', hidden_size=64, num_layers=2, lr=0.01, 
+                       pad_idx=PAD_IDX, sos_idx=SOS_IDX, eos_idx=EOS_IDX, encoder_shared_lt=False, dropout=0.0, use_cuda=True, optimizer='Adam', 
+                       grad_clip=None, encoder_attention = False, self_attention = False):
 
         super().__init__()
         self.opts = {}
@@ -263,8 +269,15 @@ class seq2seq(nn.Module):
         self.opts['dropout'] = dropout
         self.opts['encoder_shared_lt'] = encoder_shared_lt
         self.opts['grad_clip'] = grad_clip
+        self.opts['encoder_attention'] = encoder_attention;
+        self.opts['self_attention'] = self_attention;
+
+        assert( not (self_attention and encoder_attention) );
         
-        self.decoder = DecoderRNN(self.opts['vocab_size_decoder'], self.opts['embedding_size'], self.opts['hidden_size'], self.opts['num_layers'], self.opts['pad_idx'], self.opts['dropout'])
+        if not self.opts['self_attention']:
+            self.decoder = DecoderRNN(self.opts['vocab_size_decoder'], self.opts['embedding_size'], self.opts['hidden_size'], self.opts['num_layers'], self.opts['pad_idx'], self.opts['dropout'], self.opts['encoder_attention']);
+        else:
+            raise NotImplementedError # TODO SM
 
         if self.opts['encoder_type'] == 'rnn':
             self.encoder = EncoderRNN(self.opts['vocab_size_encoder'], self.opts['embedding_size'], self.opts['hidden_size'], self.opts['num_layers'], self.opts['pad_idx'], self.opts['dropout'], shared_lt=self.decoder.embedding if self.opts['encoder_shared_lt'] else None)
