@@ -151,6 +151,8 @@ class seq2seq(nn.Module):
                       version of observations.
         Return predicted responses (list of strings of length batchsize).
         """
+        import pdb; pdb.set_trace()
+        
         if xs is None:
             return
         xs = xs.to(self.device)
@@ -245,3 +247,5 @@ class seq2seq(nn.Module):
             
             print("Score:    ", math.exp(scores[k]))  # print only one generated sentence out of the bsz 
             print("")
+            
+            
