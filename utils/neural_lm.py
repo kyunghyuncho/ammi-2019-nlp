@@ -150,9 +150,7 @@ class seq2seq(nn.Module):
         :param batch: parlai.core.torch_agent.Batch, contains tensorized
                       version of observations.
         Return predicted responses (list of strings of length batchsize).
-        """
-        import pdb; pdb.set_trace()
-        
+        """        
         if xs is None:
             return
         xs = xs.to(self.device)
@@ -162,7 +160,6 @@ class seq2seq(nn.Module):
         self.encoder.eval()
         self.decoder.eval()
         
-        import pdb; pdb.set_trace()
         
         if score_only or not use_context:
             encoder_input = torch.LongTensor([gl.SOS_IDX] * self.size_ngrams)
@@ -210,7 +207,6 @@ class seq2seq(nn.Module):
                 # no need to generate any more
                 break
                 
-        import pdb; pdb.set_trace()
         predictions = [self.v2t(p) for p in predictions]
 #         predictions = [[p[i][0] for p in predictions] for i in range(bsz)]
         scores = scores / score_counts
