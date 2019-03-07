@@ -228,14 +228,16 @@ class DecoderRNN(nn.Module):
         
         decoder_hidden = decoder_hidden
         output = []
+        attn_w_log = []
         for i in range(seqlen):
             decoder_output, decoder_hidden = self.gru(emb[:,i,:].unsqueeze(1), decoder_hidden)
-            decoder_output_attended = self.attention(decoder_output, decoder_hidden, encoder_states)
-            output.append(decoder_output)
+            decoder_output_attended, attn_weights = self.attention(decoder_output, decoder_hidden, encoder_states)
+            output.append(decoder_output_attended)
+            #attn_w_log.append(attn_weights)
             
         output = torch.cat(output, dim=1).to(text_vec.device)
         scores = self.out(output)       
-        return scores, decoder_hidden
+        return scores, decoder_hidden, attn_w_log
 
 
 class seq2seq(nn.Module):
@@ -298,6 +300,14 @@ class seq2seq(nn.Module):
             ppl = math.exp(avg_loss)
             print('Loss: {}\nPPL: {}'.format(avg_loss, ppl))
             return ppl
+
+    def save_model(self, filename):
+        state_dict = self.state_dict()
+        torch.save(state_dict, filename)
+
+    def load_model(self, filename):
+        state_dict = torch.load(filename)
+        self.load_state_dict(state_dict)
         
     def train_mode(self):
         self.encoder.train()
@@ -333,37 +343,38 @@ class seq2seq(nn.Module):
         # Teacher forcing: Feed the target as the next input
         y_in = ys.narrow(1, 0, ys.size(1) - 1)
         decoder_input = torch.cat([starts, y_in], 1)
-        decoder_output, decoder_hidden = self.decoder(decoder_input, encoder_hidden, encoder_states)
+        decoder_output, decoder_hidden, attn_w_log = self.decoder(decoder_input, encoder_hidden, encoder_states)
         _, preds = decoder_output.max(dim=2)
         #import ipdb; ipdb.set_trace()
         
-        return decoder_output, preds
+        return decoder_output, preds, attn_w_log
     
     def decode_greedy(self, encoder_states, bsz):
         encoder_output, encoder_hidden = encoder_states
         
-        starts = self.BOS.expand(bsz, 1)  # expand to batch size
+        starts = self.sos_buffer.expand(bsz, 1)  # expand to batch size
         decoder_hidden = encoder_hidden  # no attention yet
 
         # greedy decoding here        
-        starts = self.BOS.expand(bsz, 1)
         preds = [starts]
         scores = []
         xs = starts
+        _attn_w_log = []
         
         for ts in range(self.longest_label):
-            decoder_output, decoder_hidden = self.decoder(xs, decoder_hidden, encoder_states)
+            decoder_output, decoder_hidden, attn_w_log = self.decoder(xs, decoder_hidden, encoder_states)
             _scores, _preds = decoder_output.max(dim=-1)
             scores.append(_scores)
             preds.append(_preds)
+            _attn_w_log.append(attn_w_log)
             
             xs = _preds
             
         #import ipdb; ipdb.set_trace()
-        return scores, preds
+        return scores, preds, attn_w_log
 
     def compute_loss(self, encoder_states, xs_lens, ys):
-        decoder_output, preds = self.decode_forced(ys, encoder_states, xs_lens)
+        decoder_output, preds, attn_w_log = self.decode_forced(ys, encoder_states, xs_lens)
         scores = decoder_output.view(-1, decoder_output.size(-1))
         loss = self.criterion(scores, ys.view(-1))
         # normalize loss per non_null num of tokens
@@ -405,6 +416,6 @@ class seq2seq(nn.Module):
             _ = self.compute_loss(encoder_states, xs_lens, ys)
             
         if decoding_strategy == 'greedy':
-            scores, preds = self.decode_greedy(encoder_states, batch.text_vecs.size(0))
+            scores, preds, attn_w_log = self.decode_greedy(encoder_states, batch.text_vecs.size(0))
             return scores, preds
 
