@@ -419,11 +419,11 @@ class seq2seq(nn.Module):
 
 
     def eval_step(self, batch, decoding_strategy='score'):
-        xs, ys = batch.text_vecs, batch.label_vecs
+        xs, ys, use_packed = batch.text_vecs, batch.label_vecs, batch.use_packed
         xs_lens, ys_lens = batch.text_lens, batch.label_lens
             
         self.eval_mode()
-        encoder_states = self.encoder(xs, xs_lens)
+        encoder_states = self.encoder(xs, xs_lens, use_packed=use_packed)
         if decoding_strategy == 'score':
             assert ys is not None
             _ = self.compute_loss(encoder_states, xs_lens, ys)
