@@ -19,6 +19,7 @@ import pygtrie
 import global_variables as gl
 import sys
 import spacy
+import math
 
 # Load English tokenizer, tagger, parser, NER and word vectors
 tokenizer = spacy.load('en_core_web_sm')               
@@ -82,9 +83,8 @@ def get_vocab(data, frac_vocab=0.9):
 def get_dict(vocab):
     id2token = list(vocab)
     token2id = dict(zip(vocab, range(4, 4+len(vocab)))) 
-    id2token = [gl.PAD_TOKEN, gl.UNK_TOKEN, gl.SOS_TOKEN, gl.EOS_TOKEN] + id2token
+    id2token = [gl.UNK_TOKEN, gl.SOS_TOKEN, gl.EOS_TOKEN] + id2token
 
-    token2id[gl.PAD_TOKEN] = gl.PAD_IDX 
     token2id[gl.UNK_TOKEN] = gl.UNK_IDX
     token2id[gl.SOS_TOKEN] = gl.SOS_IDX 
     token2id[gl.EOS_TOKEN] = gl.EOS_IDX
@@ -108,10 +108,9 @@ class NgramLM:
         self.smoothing = smoothing
         self.alpha = alpha
         self.delta = delta
-        self.vocabulary = list(set(all_tokens))
-        self.num_all_tokens = len(all_tokens)
         self.raw_data = tokenized_data
         
+        self.id2token, self.token2id = self.make_vocab_ids()
         self.padded_data = self.pad_sentences(self.n)
         self.ngram_data = self.find_ngrams(self.n)
 
@@ -119,7 +118,9 @@ class NgramLM:
         self.vocab_unigram, self.count_unigram = self.ngram_counts(1)
         self.vocab_bigram, self.count_bigram = self.ngram_counts(2)
         self.vocab_trigram, self.count_trigram = self.ngram_counts(3)
-
+        
+        self.id2token_ngram, self.token2id_ngram = self.ngram_dict()
+        
         self.trie_ngram = self.make_trie(self.n)
         self.trie_unigram = self.make_trie(1)
         self.trie_bigram = self.make_trie(2)
@@ -132,10 +133,6 @@ class NgramLM:
             self.vocab_prev_ngram, self.count_prev_ngram = None, None
             self.trie_prev_ngram = None
             
-        self.id2token, self.token2id = self.ngram_dict()
-        self.id2token_unigram, self.token2id_unigram = self.ngram_dict(vocab=self.vocab_unigram)
-        
-        
     def pad_sentences(self, n, sentence=None):
         if sentence:
             data = sentence
@@ -146,7 +143,25 @@ class NgramLM:
             padded = [gl.SOS_TOKEN for i in range(n - 1)] + l + [gl.EOS_TOKEN for i in range(n - 1)]
             result_list.append(padded)
         return result_list
+    
+    def make_vocab_ids(self):
+        all_train_tokens = list(mit.flatten(self.raw_data))
+        
+        counted_tokens = Counter(all_train_tokens)
+        max_vocab_size = int(self.frac_vocab * len(counted_tokens))
 
+        vocab, _ = zip(*counted_tokens.most_common(max_vocab_size))
+                        
+        id2token = list(vocab)
+        token2id = dict(zip(vocab, range(3, 3+len(vocab)))) 
+        id2token = [gl.UNK_TOKEN, gl.SOS_TOKEN, gl.EOS_TOKEN] + id2token
+
+        token2id[gl.UNK_TOKEN] = gl.UNK_IDX
+        token2id[gl.SOS_TOKEN] = gl.SOS_IDX 
+        token2id[gl.EOS_TOKEN] = gl.EOS_IDX
+
+        return id2token, token2id
+    
     def find_ngrams(self, n, sentence=None):
         if sentence:
             data = sentence
@@ -167,41 +182,35 @@ class NgramLM:
         max_vocab_size = int(self.frac_vocab * len(counted_tokens))
 
         vocab, count = zip(*counted_tokens.most_common(max_vocab_size))
-
-        return vocab, count
-    
-    def convert_to_trie(self, x):
-        return '/'.join(x) 
-
-    def convert_to_ngram(self, x):
-        return tuple(x.split('/'))
-    
-    def make_trie(self, n=None):
-        if n == None:
-            n = self.n
-        vocab_ngram, count_ngram = self.ngram_counts(n)
         
-        trie = pygtrie.StringTrie()
-        for vn, cn in zip(vocab_ngram, count_ngram):
-            tn = self.convert_to_trie(vn)
-            if tn not in trie:
-                trie[tn] = cn
-        return trie 
+        return vocab, count
     
     def ngram_dict(self, vocab=None):
         if vocab == None:
             vocab = self.vocab_ngram
             
-        id2token = list(vocab)
-        token2id = dict(zip(vocab, range(4, 4+len(vocab)))) 
-        id2token = [gl.PAD_TOKEN, gl.UNK_TOKEN, gl.SOS_TOKEN, gl.EOS_TOKEN] + id2token
+        id2token_ngram = list(vocab)
+        token2id_ngram = dict(zip(vocab, range(len(vocab)))) 
 
-        token2id[gl.PAD_TOKEN] = gl.PAD_IDX 
-        token2id[gl.UNK_TOKEN] = gl.UNK_IDX
-        token2id[gl.SOS_TOKEN] = gl.SOS_IDX 
-        token2id[gl.EOS_TOKEN] = gl.EOS_IDX
-
-        return id2token, token2id
+        return id2token_ngram, token2id_ngram
+    
+    def convert_to_trie(self, x):
+        return '/'.join(x) 
+        
+    def convert_to_ngram(self, x):
+        return tuple(x.split('/'))
+        
+    # TODO: the trie needs to be made out of the entire dict and using ids not tokens
+    def make_trie(self, n=None):
+        if n == None:
+            n = self.n
+            
+        trie = pygtrie.StringTrie()
+        for vn, cn in zip(self.vocab_ngram, self.count_ngram):
+            tn = self.convert_to_trie(vn)
+            if tn not in trie:
+                trie[tn] = cn
+        return trie 
     
     def get_ngram_count(self, ngram, trie=None):
         if trie is None:
@@ -223,7 +232,7 @@ class NgramLM:
                 all_counts = sum([prefixes[i][1] for i in range(len(prefixes))])
             if all_counts > 0:
                 return c / all_counts
-            else: 
+            else:
                 return 0
             
         elif self.smoothing == 'additive':
@@ -245,12 +254,12 @@ class NgramLM:
         if self.trie_ngram.has_subtrie(nt_prefix):  # check if prefix exists in trie
             prefixes = self.trie_ngram.items(prefix=nt_prefix)
             all_counts = sum([prefixes[i][1] for i in range(len(prefixes))])
-        all_counts += delta*len(self.id2token_unigram)
+        all_counts += delta*len(self.id2token)
         if all_counts > 0:
             return c / all_counts
         else:
-            return 0
-            
+            return 0 
+        
     def get_ngram_prob_add_one_smoothing(self, ngram):
         return self.get_ngram_prob_additive_smoothing(ngram, delta=1)
 
@@ -265,7 +274,7 @@ class NgramLM:
             prob_ngram = c / all_counts
         else:
             prob_ngram = 0
-
+            
         prev_ngram = tuple(list(ngram[1:]))
         prev_c = self.get_ngram_count(prev_ngram, trie=self.trie_prev_ngram)
         prev_prefix=  self.convert_to_trie(prev_ngram[:-1])
@@ -275,9 +284,9 @@ class NgramLM:
             prev_all_counts = sum([prev_prefixes[i][1] for i in range(len(prev_prefixes))])
         if prev_all_counts > 0:
             prob_prev_ngram = prev_c  / prev_all_counts
-        else:
+        else: 
             prob_prev_ngram = 0
-
+            
         return alpha*(prob_ngram) + (1-alpha)*prob_prev_ngram
 
     def get_unigram_count(self, r):
@@ -304,7 +313,7 @@ class NgramLM:
 
     # TODO: normalize this pd
     def get_p_uni(self, w):
-        N = self.num_all_tokens
+        N = len(self.token2id)
         
         uni_w = self.convert_to_trie(w)
         if uni_w in self.trie_unigram:
@@ -314,7 +323,7 @@ class NgramLM:
 
         b_uni = self.get_b_uni()
 
-        W = len(self.id2token_unigram)
+        W = len(self.id2token)
         N_0 = self.get_unigram_count(0)
         
         p_uni = max((N_w - b_uni / N), 0) + b_uni * (W - N_0) / N * 1 / W
@@ -339,7 +348,7 @@ class NgramLM:
 
         p_uni = self.get_p_uni(tuple([w]))
 
-        W = len(self.id2token_unigram)
+        W = len(self.id2token)
         N_0 = self.get_biunigram_count(0, v)
 
 
@@ -369,34 +378,30 @@ class NgramLM:
             else:
                 score += np.log(sys.float_info.min)    
             count += 1
-        ppl = math.exp(-score / count)
+        ppl = math.exp(- score / (count + 1))
         return ppl
     
     def get_prob_distr_ngram(self, prev_tokens, smoothing=None):
-        pd = [0 for v in self.id2token_unigram]
+        pd = [0 for v in self.id2token]
         nt_prefix = self.convert_to_trie(prev_tokens)
         if self.trie_ngram.has_subtrie(nt_prefix):
             prefixed_ngrams = self.trie_ngram.items(prefix=nt_prefix)
             for ngram in prefixed_ngrams:
-                suffix = tuple([ngram[0].split('/')[-1]])      # get the suffix of this ngram
-                if suffix in self.token2id_unigram:
-                    idx_suffix = self.token2id_unigram[suffix]     # get the idx in the vocabulary of this suffix token
+                suffix = ngram[0].split('/')[-1]      # get the suffix of this ngram
+                if suffix in self.token2id:
+                    idx_suffix = self.token2id[suffix]     # get the idx in the vocabulary of this suffix token
                 else:
-                    idx_suffix = self.token2id_unigram[gl.UNK_TOKEN]
+                    idx_suffix = self.token2id[gl.UNK_TOKEN]
                 pd[idx_suffix] = self.get_ngram_prob(self.convert_to_ngram(ngram[0]))
-#                 print(self.id2token_unigram[idx_suffix][0], pd[idx_suffix])
-        if np.sum(pd) > 0:
+        if sum(pd) > 0:
             return [p/sum(pd) for p in pd]
         else:
-            return pd
+            return [1/len(pd) for p in pd]
         
     def sample_from_pd(self, prev_tokens):
         pd = self.get_prob_distr_ngram(prev_tokens)
-        if sum(pd) > 0:
-            idx_next_token = np.random.choice(len(self.id2token_unigram), 1, p=pd)[0]
-        else:
-            idx_next_token = np.random.choice(len(self.id2token_unigram), 1)[0]
-        return self.id2token_unigram[idx_next_token][0]
+        idx_next_token = np.random.choice(len(self.id2token), 1, p=pd)[0]
+        return self.id2token[idx_next_token]
 
     def generate_sentence(self, num_tokens, context=None):
         sentence = []
@@ -422,9 +427,6 @@ class NgramLM:
             prob = self.get_prob_sentence([s])
             ll += np.log(prob + sys.float_info.min)
             num_tokens += len(s) + 1
-#             if prob > 0:
-#                 ll += np.log(prob) # + sys.float_info.min)
-#                 num_tokens += len(s) + 1
         ppl = np.exp(-ll/num_tokens)
         return ppl
 
@@ -433,16 +435,3 @@ class NgramLM:
 
     def _id2text(self, vec):
         return [self.id2token[i] for i in vec]
-
-    def create_data_id(self, data):
-        data_id = []
-        for d in data:
-            data_id.append(self._text2id(d))
-        return data_id
-
-    def create_data_id_merged(self, data, N):
-        data_id_merged = []
-        for d in data:
-            for i in range(len(d) - N):
-                data_id_merged.append((d[i:i+N], d[i+N]))
-        return data_id_merged
