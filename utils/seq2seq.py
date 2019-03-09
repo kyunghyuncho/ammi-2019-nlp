@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from global_variables import SOS_IDX, SOS_TOKEN, EOS_IDX, EOS_TOKEN, UNK_IDX, UNK_TOKEN, PAD_IDX, PAD_TOKEN, SEP_IDX, SEP_TOKEN, device
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+from beam import Beam
 import math
 
 
@@ -115,6 +116,7 @@ class EncoderRNN(nn.Module):
         output, hidden = self.gru(embedded, hidden)
         if use_packed is True:
             output, output_lens = pad_packed_sequence(output)
+            output = output.transpose(0,1)
         
         return output, hidden
 
@@ -211,7 +213,7 @@ class IBMAttentionLayer(nn.Module):
     def forward(self, query, context):
 
         query = query.transpose(0,1)
-        context = context.transpose(0,1)
+        #context = context.transpose(0,1)
         batch_size, output_len, dimensions = query.size()
         context_len = context.size(1)
 
@@ -431,6 +433,37 @@ class seq2seq(nn.Module):
         #import ipdb; ipdb.set_trace()
         return scores, preds, attn_w_log
 
+    def decode_beam(self, beam_size, batch_size, encoder_states):
+        dev = self.opts['device']
+        beams = [ Beam() for _ in range(batch_size) ]
+        decoder_input = self.sos_buffer.expand(batch_size * beam_size, 1).to(dev)
+        inds = torch.arange(batch_size).to(dev).unsqueeze(1).repeat(1, beam_size).view(-1)
+        
+        encoder_states = self.reorder_encoder_states(encoder_states, inds)  # not reordering but expanding
+        incr_state = encoder_states[1]
+        
+        for ts in range(self.longest_label):
+            if all((b.done() for b in beams)):
+                break
+            score, incr_state = self.decoder(decoder_input, incr_state)
+            score = score[:, -1:, :]
+            score = score.view(bsz, beam_size, -1)
+            score = F.log_softmax(score, dim=-1)
+            
+            for i, b in enumerate(beams):
+                if not b.done():
+                    b.advance(score[i])
+                    
+            incr_state_inds = torch.cat([beam_size * i + b.get_backtrack_from_current_step() for i, b in enumerate(beams)])
+            incr_state = self.reorder_decoder_incremental_state(incr_state, incr_state_inds)
+            selection = torch.cat([b.get_output_from_current_step() for b in beams]).unsqueeze(-1)
+            decoder_input = selection
+            
+        for b in beams:
+            b.check_finished()
+
+        return beams
+
     def compute_loss(self, encoder_states, xs_lens, ys):
         decoder_output, preds, attn_w_log = self.decode_forced(ys, encoder_states, xs_lens)
         scores = decoder_output.view(-1, decoder_output.size(-1))
@@ -476,4 +509,8 @@ class seq2seq(nn.Module):
         if decoding_strategy == 'greedy':
             scores, preds, attn_w_log = self.decode_greedy(encoder_states, batch.text_vecs.size(0))
             return scores, preds
+
+        if decoding_strategy == 'beam':
+            beams = self.decode_beam(5, len(batch.text_lens), encoder_states)
+            return beams
 
