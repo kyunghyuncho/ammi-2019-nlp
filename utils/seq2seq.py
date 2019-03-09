@@ -332,7 +332,6 @@ class seq2seq(nn.Module):
         optim_class = getattr(optim, optimizer)
 
         self.optimizer = optim_class(self.parameters(), self.opts['lr'], amsgrad=True)
-        self.lr_scheduler = ReduceLROnPlateau(self.optimizer, mode='min')
 
         self.criterion = nn.CrossEntropyLoss(ignore_index=self.opts['pad_idx'], reduction='sum')
         
