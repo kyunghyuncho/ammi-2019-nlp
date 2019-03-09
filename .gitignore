@@ -1,5 +1,4 @@
 __pycache__
-data
 .vector_cache
 .ipynb_checkpoints
 *.pyc

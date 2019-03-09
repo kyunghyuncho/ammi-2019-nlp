@@ -54,12 +54,11 @@ def tokenize_dataset(dataset, batch_size=1024):
     # tokenize all words -- each token will be an item in all_tokens (in the order given by the list of sentences)
     all_tokens = []     # all the tokens -- 
     
-#     doc = nlp(raw_text)
-#     sentences = [sent.string.strip() for sent in doc.sents]
-
+    # split the reviews into sentences
     sentence_dataset = split_into_sentences(dataset) 
+    # process data: make all the words lower case and remove some less relevant punctuation 
     for sample in _tqdm(tokenizer.pipe(sentence_dataset, disable=['parser', 'tagger', 'ner'], batch_size=batch_size, n_threads=1)):
-        tokens = lower_case_remove_punc(sample)        
+        tokens = lower_case_remove_punc(sample) 
         token_dataset.append(tokens)    
         all_tokens += tokens
 
@@ -358,6 +357,21 @@ class NgramLM:
             prob *= prob_ngram
         return prob
     
+    def get_score_sentence(self, sentence):
+        padded_sentence = self.pad_sentences(self.n, sentence=sentence)  # needs a list
+        ngram_sentence = self.find_ngrams(self.n, sentence=padded_sentence)[0] # only one element in list
+        score = 0
+        count = 0
+        for ngram in ngram_sentence:
+            prob_ngram = self.get_ngram_prob(ngram)
+            if prob_ngram > 0:
+                score += np.log(prob_ngram)
+            else:
+                score += np.log(sys.float_info.min)    
+            count += 1
+        ppl = math.exp(-score / count)
+        return ppl
+    
     def get_prob_distr_ngram(self, prev_tokens, smoothing=None):
         pd = [0 for v in self.id2token_unigram]
         nt_prefix = self.convert_to_trie(prev_tokens)
@@ -408,6 +422,9 @@ class NgramLM:
             prob = self.get_prob_sentence([s])
             ll += np.log(prob + sys.float_info.min)
             num_tokens += len(s) + 1
+#             if prob > 0:
+#                 ll += np.log(prob) # + sys.float_info.min)
+#                 num_tokens += len(s) + 1
         ppl = np.exp(-ll/num_tokens)
         return ppl
 
