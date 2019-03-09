@@ -220,6 +220,8 @@ class IBMAttentionLayer(nn.Module):
             query = self.linear_in(query)
             query = query.view(batch_size, output_len, dimensions)
 
+#         print('query: ', query.shape)
+#         print('context: ', context.shape)
         attention_scores = torch.bmm(query, context.transpose(1,2).contiguous())
         attention_scores = attention_scores.view(batch_size*output_len, context_len)
         attention_weights = self.softmax(attention_scores)
