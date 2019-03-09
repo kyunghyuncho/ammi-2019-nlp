@@ -10,12 +10,7 @@ from collections import namedtuple
 
 import torch
 
-import global_variables
-
-SOS_token = global_variables.SOS_token
-EOS_token = global_variables.EOS_token
-UNK_IDX = global_variables.UNK_IDX
-PAD_IDX = global_variables.PAD_IDX
+from global_variables import SOS_IDX, SOS_TOKEN, EOS_IDX, EOS_TOKEN, UNK_IDX, UNK_TOKEN, PAD_IDX, PAD_TOKEN, device
 
 
 class Lang:
@@ -24,10 +19,20 @@ class Lang:
 		self.word2index = {}
 		self.word2count = {}
 		self.index2word = [None]*4
-		self.index2word[SOS_token] = 'SOS'
-		self.index2word[EOS_token] = 'EOS'
-		self.index2word[UNK_IDX] = 'UNK'
-		self.index2word[PAD_IDX] = 'PAD'
+		self.index2word[SOS_IDX] = SOS_TOKEN
+		self.index2word[EOS_IDX] = EOS_TOKEN
+		self.index2word[UNK_IDX] = UNK_TOKEN
+		self.index2word[PAD_IDX] = PAD_TOKEN
+
+		self.word2count[SOS_TOKEN] = 100;
+		self.word2count[EOS_TOKEN] = 100;
+		self.word2count[UNK_TOKEN] = 100;
+		self.word2count[PAD_TOKEN] = 100;
+
+		self.word2index[SOS_TOKEN] = SOS_IDX;
+		self.word2index[EOS_TOKEN] = EOS_IDX;
+		self.word2index[UNK_TOKEN] = UNK_IDX;
+		self.word2index[PAD_TOKEN] = PAD_IDX;
 		self.n_words = 4  # Count SOS and EOS
 
 		self.minimum_count = minimum_count;
@@ -52,13 +57,19 @@ class Lang:
 		word_list = []
 		if type(list_idx) == list:
 			for i in list_idx:
-				if i not in set([EOS_token]):
+				if i not in [EOS_IDX, SOS_IDX, PAD_IDX]:
 					word_list.append(self.index2word[i])
 		else:
 			for i in list_idx:
-				if i.item() not in set([EOS_token,SOS_token,PAD_IDX]):
+				if i.item() not in [EOS_IDX,SOS_IDX,PAD_IDX]:
 					word_list.append(self.index2word[i.item()])
 		return (' ').join(word_list)
+
+	def txt2vec(self, sentence):
+		token_list = sentence.lower().split();
+		index_list = [self.word2index[token] if token in self.word2index else UNK_IDX for token in token_list]
+		return torch.from_numpy(np.array(index_list)).to(device)
+
 
 
 # Turn a Unicode string to plain ASCII, thanks to
@@ -99,7 +110,7 @@ def token2index_dataset(df, source_lang_obj, target_lang_obj):
 		for tokens in df[lan+'_tokenized']:
 			
 			index_list = [lang_obj.word2index[token] if token in lang_obj.word2index else UNK_IDX for token in tokens]
-			index_list.append(EOS_token)
+			index_list.append(EOS_IDX)
 			indices_data.append(index_list)
 			
 		df[lan+'_indized'] = indices_data
@@ -210,10 +221,11 @@ def vocab_collate_func(batch, MAX_LEN):
 		target_data.append(padded_vec_s2)
 		
 	
-	named_returntuple = namedtuple('namedtuple', ['text_vec', 'text_lengths', 'label_vec', 'label_lengths'])
-	return_tuple =named_returntuple( torch.from_numpy(np.array(source_data)), 
-									 torch.from_numpy(np.array(source_len)),
-									 torch.from_numpy(np.array(target_data)),
-									 torch.from_numpy(np.array(target_len)) );
+	named_returntuple = namedtuple('namedtuple', ['text_vecs', 'text_lens', 'label_vecs', 'label_lens', 'use_packed'])
+	return_tuple =named_returntuple( torch.from_numpy(np.array(source_data)).to(device), 
+									 torch.from_numpy(np.array(source_len)).to(device),
+									 torch.from_numpy(np.array(target_data)).to(device),
+									 torch.from_numpy(np.array(target_len)).to(device),
+									 False );
 
 	return return_tuple
