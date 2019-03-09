@@ -361,7 +361,7 @@ class seq2seq(nn.Module):
             avg_loss = self.metrics['loss'] / self.metrics['num_tokens']
             ppl = math.exp(avg_loss)
             print('Loss: {}\nPPL: {}'.format(avg_loss, ppl))
-            return ppl
+            return ppl, avg_loss
 
     def save_model(self, filename):
         state_dict = self.state_dict()
