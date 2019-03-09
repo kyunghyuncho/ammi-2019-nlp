@@ -3,7 +3,7 @@ import torch
 from torch import optim
 import torch.nn as nn
 import torch.nn.functional as F
-from global_variables import SOS_IDX, SOS_TOKEN, EOS_IDX, EOS_TOKEN, UNK_IDX, UNK_TOKEN, PAD_IDX, PAD_TOKEN, SEP_IDX, SEP_TOKEN, device
+from global_variables import SOS_IDX, SOS_TOKEN, EOS_IDX, EOS_TOKEN, UNK_IDX, UNK_TOKEN, PAD_IDX, PAD_TOKEN, SEP_IDX, SEP_TOKEN, device, NEAR_INF
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 import math
@@ -420,20 +420,59 @@ class seq2seq(nn.Module):
         # greedy decoding here        
         preds = [starts]
         scores = []
+        
+        finish_mask = torch.Tensor([0]*bsz).byte().to(self.opts['device'])
         xs = starts
         _attn_w_log = []
         
         for ts in range(self.longest_label):
             decoder_output, decoder_hidden, attn_w_log = self.decoder(xs, decoder_hidden, encoder_states)
-            _scores, _preds = decoder_output.max(dim=-1)
-            scores.append(_scores)
+            _scores, _preds = F.log_softmax(decoder_output, dim=-1).max(dim=-1)
             preds.append(_preds)
             _attn_w_log.append(attn_w_log)
-            
+            scores.append(_scores.view(-1)*(finish_mask == 0).float())
+
+            finish_mask += (_preds == self.opts['eos_idx']).view(-1)
             xs = _preds
             
         #import ipdb; ipdb.set_trace()
         return scores, preds, attn_w_log
+
+    def decode_beam(self, beam_size, batch_size, encoder_states):
+        dev = self.opts['device']
+        beams = [ Beam(beam_size, device='cuda') for _ in range(batch_size) ]
+        decoder_input = self.sos_buffer.expand(batch_size * beam_size, 1).to(dev)
+        inds = torch.arange(batch_size).to(dev).unsqueeze(1).repeat(1, beam_size).view(-1)
+        
+        encoder_states = self.reorder_encoder_states(encoder_states, inds)  # not reordering but expanding
+        incr_state = encoder_states[1]
+        
+        for ts in range(self.longest_label):
+            if all((b.done() for b in beams)):
+                break
+            score, incr_state, attn_w_log = self.decoder(decoder_input, incr_state, encoder_states)
+            score = score[:, -1:, :]
+            score = score.view(batch_size, beam_size, -1)
+            score = F.log_softmax(score, dim=-1)
+            
+            for i, b in enumerate(beams):
+                if not b.done():
+                    b.advance(score[i])
+                    
+            incr_state_inds = torch.cat([beam_size * i + b.get_backtrack_from_current_step() for i, b in enumerate(beams)])
+            incr_state = self.reorder_decoder_incremental_state(incr_state, incr_state_inds)
+            selection = torch.cat([b.get_output_from_current_step() for b in beams]).unsqueeze(-1)
+            decoder_input = selection
+            
+        for b in beams:
+            b.check_finished()
+
+        beam_preds_scores = [list(b.get_top_hyp()) for b in beams]
+        for pair in beam_preds_scores:
+            pair[0] = Beam.get_pretty_hypothesis(pair[0])
+        #import ipdb; ipdb.set_trace()
+
+        return beam_preds_scores
 
     def compute_loss(self, encoder_states, xs_lens, ys):
         decoder_output, preds, attn_w_log = self.decode_forced(ys, encoder_states, xs_lens)
@@ -466,6 +505,41 @@ class seq2seq(nn.Module):
         loss.backward()
         self.update_params()
 
+    def reorder_encoder_states(self, encoder_states, indices):
+        """Reorder encoder states according to a new set of indices."""
+        enc_out, hidden = encoder_states
+
+        # LSTM or GRU/RNN hidden state?
+        if isinstance(hidden, torch.Tensor):
+            hid, cell = hidden, None
+        else:
+            hid, cell = hidden
+
+        if not torch.is_tensor(indices):
+            # cast indices to a tensor if needed
+            indices = torch.LongTensor(indices).to(hid.device)
+
+        hid = hid.index_select(1, indices)
+        if cell is None:
+            hidden = hid
+        else:
+            cell = cell.index_select(1, indices)
+            hidden = (hid, cell)
+
+        enc_out = enc_out.index_select(0, indices)
+
+        return enc_out, hidden#, attn_mask
+    
+    
+    def reorder_decoder_incremental_state(self, incremental_state, inds):
+        if torch.is_tensor(incremental_state):
+            # gru or lstm
+            return torch.index_select(incremental_state, 1, inds).contiguous()
+        elif isinstance(incremental_state, tuple):
+            return tuple(
+                self.reorder_decoder_incremental_state(x, inds)
+                for x in incremental_state)
+
 
     def eval_step(self, batch, decoding_strategy='score'):
         xs, ys, use_packed = batch.text_vecs, batch.label_vecs, batch.use_packed
@@ -479,5 +553,15 @@ class seq2seq(nn.Module):
             
         if decoding_strategy == 'greedy':
             scores, preds, attn_w_log = self.decode_greedy(encoder_states, batch.text_vecs.size(0))
-            return scores, preds
+            preds = torch.stack(preds, dim=1)
+            scores = torch.stack(scores, dim=1)
+            #import ipdb; ipdb.set_trace()
+            pred_lengths = (scores < 0).sum(dim=1).to(scores.device)
+            length_penalties = torch.Tensor([Beam.get_length_penalty(i) for i in pred_lengths.tolist()]).to(scores.device)
+            scores_length_penalized = scores.sum(dim=1) / length_penalties
+            pred_scores = tuple((p, s) for p,s in zip(preds,scores_length_penalized))
+            return pred_scores
 
+        if 'beam' in decoding_strategy:
+            beams = self.decode_beam(int(decoding_strategy.split(':')[-1]), len(batch.text_lens), encoder_states)
+            return pred_scores

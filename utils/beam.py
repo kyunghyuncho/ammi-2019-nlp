@@ -1,8 +1,9 @@
 import torch
 from collections import namedtuple
 from operator import attrgetter
-from global_variables import SOS_IDX, SOS_TOKEN, EOS_IDX, EOS_TOKEN, UNK_IDX, UNK_TOKEN, PAD_IDX, PAD_TOKEN, SEP_IDX, SEP_TOKEN
+from global_variables import SOS_IDX, SOS_TOKEN, EOS_IDX, EOS_TOKEN, UNK_IDX, UNK_TOKEN, PAD_IDX, PAD_TOKEN, SEP_IDX, SEP_TOKEN, NEAR_INF
 
+import math
 
 class Beam(object):
     def __init__(self, beam_size=10, min_length=3, padding_token=PAD_IDX, bos_token=SOS_IDX, eos_token=EOS_IDX, min_n_best=3, device='cpu'):
@@ -108,6 +109,10 @@ class Beam(object):
         return hyp_idx
     
     @staticmethod
+    def get_length_penalty(length):
+        return math.pow((1+length)/6, 0.65)
+
+    @staticmethod
     def get_pretty_hypothesis(list_of_hypotails):
         """Return prettier version of the hypotheses."""
         hypothesis = []
@@ -124,9 +129,9 @@ class Beam(object):
         """
         rescored_finished = []
         for finished_item in self.finished:
-            current_length = finished_item.timestep + 1
+            current_length = finished_item.timestep
             # these weights are from Google NMT paper
-            length_penalty = math.pow((1 + current_length) / 6, 0.65)
+            length_penalty = Beam.get_length_penalty(current_length)
             rescored_finished.append(self.HypothesisTail(
                 timestep=finished_item.timestep, hypid=finished_item.hypid,
                 score=finished_item.score / length_penalty,
