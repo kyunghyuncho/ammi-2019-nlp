@@ -101,7 +101,7 @@ def get_ids(data, token2id):
     
 class NgramLM:
     def __init__(self, tokenized_data, all_tokens, n=3, frac_vocab=0.9, \
-                smoothing=None, delta=0.5, alpha=0.8):
+                smoothing=None, delta=0.1, alpha=0.9):
 
         self.n = n
         self.frac_vocab = frac_vocab
@@ -420,13 +420,14 @@ class NgramLM:
             print(' '.join(sentence))
         return ' '.join(sentence)
     
-    def get_perplexity(self, test_sentences):
+    def get_perplexity(self, test_sentences, subsample=None):
         ll = 0
         num_tokens = 0
-        for s in (test_sentences):
-            prob = self.get_prob_sentence([s])
-            ll += np.log(prob + sys.float_info.min)
-            num_tokens += len(s) + 1
+        for i, s in enumerate(test_sentences):
+            if subsample and i % subsample == 0:
+                prob = self.get_prob_sentence([s])
+                ll += np.log(prob + sys.float_info.min)
+                num_tokens += len(s) + 1
         ppl = np.exp(-ll/num_tokens)
         return ppl
 
