@@ -243,5 +243,4 @@ class seq2seq(nn.Module):
             
             print("Score:    ", math.exp(scores[k]))  # print only one generated sentence out of the bsz 
             print("")
-            
-            
+      
