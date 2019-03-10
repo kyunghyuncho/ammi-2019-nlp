@@ -72,31 +72,20 @@ class Lang:
 
 
 
-# Turn a Unicode string to plain ASCII, thanks to
-# http://stackoverflow.com/a/518232/2809427
-def unicodeToAscii(s):
-	return ''.join(
-		c for c in unicodedata.normalize('NFD', s)
-		if unicodedata.category(c) != 'Mn'
-	)
+def read_one_dataset(file):
+	f = open(file)
+	list_l = []
+	for line in f:
+		list_l.append(line.strip())
+	df = pd.DataFrame()
+	df['data'] = list_l
+	return df
 
-# Lowercase, trim, and remove non-letter characters
-
-
-def normalizeString(s):
-	s = unicodeToAscii(s.lower().strip())
-	s = re.sub(r"([.!?])", r" \1", s)
-	s = re.sub(r"[^a-zA-Z.!?]+", r" ", s)
-	return s
-
-def read_dataset(file):
-	# Read the file and split into lines
-	lines = open(file, encoding='utf-8').\
-		read().strip().split('\n')
-
-	# Split every line into pairs and normalize
-	pairs = [[normalizeString(s) for s in l.split('\t')] for l in lines]
-	return pd.DataFrame(pairs, columns = ['source_data', 'target_data'])
+def read_dataset(filepath_dict):
+	main_df = pd.DataFrame();
+	for x in filepath_dict.keys():
+		main_df[x+'_data'] = read_one_dataset(filepath_dict[x])['data'];
+	return main_df
 
 
 def token2index_dataset(df, source_lang_obj, target_lang_obj):
@@ -188,6 +177,26 @@ class LanguagePair(Dataset):
 		return return_list 
 
 
+def argsort(keys, *lists, descending=False):
+    """Reorder each list in lists by the (descending) sorted order of keys.
+    :param iter keys: Keys to order by.
+    :param list[list] lists: Lists to reordered by keys's order.
+                             Correctly handles lists and 1-D tensors.
+    :param bool descending: Use descending order if true.
+    :returns: The reordered items.
+    """
+    ind_sorted = sorted(range(len(keys)), key=lambda k: keys[k])
+    if descending:
+        ind_sorted = list(reversed(ind_sorted))
+    output = []
+    for lst in lists:
+        if isinstance(lst, torch.Tensor):
+            output.append(lst[ind_sorted])
+        else:
+            output.append([lst[i] for i in ind_sorted])
+    return output
+
+
 def vocab_collate_func(batch, MAX_LEN):
 	source_data = []
 	target_data = []
@@ -221,11 +230,15 @@ def vocab_collate_func(batch, MAX_LEN):
 		target_data.append(padded_vec_s2)
 		
 	
+	packed = True;
+	if packed:
+		source_data, source_len, target_data, target_len = argsort(source_len, source_data, source_len, target_data, target_len, descending=True)
+
 	named_returntuple = namedtuple('namedtuple', ['text_vecs', 'text_lens', 'label_vecs', 'label_lens', 'use_packed'])
 	return_tuple =named_returntuple( torch.from_numpy(np.array(source_data)).to(device), 
 									 torch.from_numpy(np.array(source_len)).to(device),
 									 torch.from_numpy(np.array(target_data)).to(device),
 									 torch.from_numpy(np.array(target_len)).to(device),
-									 False );
+									 packed );
 
 	return return_tuple
