@@ -96,6 +96,13 @@ class seq2seq(nn.Module):
         self.START = torch.LongTensor([gl.SOS_IDX]).to(device)
         self.END_IDX = gl.EOS_IDX
         
+    def save_model(self, filename):
+        state_dict = self.state_dict()
+        torch.save(state_dict, filename)
+
+    def load_model(self, filename):
+        state_dict = torch.load(filename)
+        self.load_state_dict(state_dict)        
         
     def zero_grad(self):
         """Zero out optimizer."""
@@ -154,8 +161,6 @@ class seq2seq(nn.Module):
         xs = xs.to(self.device)
         ys = ys.to(self.device)
 
-        self.zero_grad()
-
         self.encoder.eval()
         self.decoder.eval()
             
@@ -182,12 +187,15 @@ class seq2seq(nn.Module):
         self.encoder.eval()
         self.decoder.eval()
         
-        
         if score_only or not use_context:
             encoder_input = torch.LongTensor([gl.SOS_IDX] * self.size_ngrams)
             encoder_input = encoder_input.unsqueeze(0).repeat(bsz, 1)
         else:
-            encoder_input = xs   # this needs to be of shape bsz, self.size_ngrams
+            if xs.size(1) >= self.size_ngrams:
+                encoder_input = xs[-self.size_ngrams:]
+            else:
+                encoder_input = torch.LongTensor([[gl.SOS_IDX] * (self.size_ngrams - xs.size(1))])
+                encoder_input = torch.cat((encoder_input, xs), dim=1)   # this needs to be of shape bsz, self.size_ngrams
                 
         predictions = []
         done = [False for _ in range(bsz)]
