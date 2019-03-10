@@ -1,4 +1,4 @@
-
+from beam import Beam
 import torch
 from torch import optim
 import torch.nn as nn
@@ -148,8 +148,6 @@ class IBMAttentionLayer(nn.Module):
             query = self.linear_in(query)
             query = query.view(batch_size, output_len, dimensions)
 
-#         print('query: ', query.shape)
-#         print('context: ', context.shape)
         attention_scores = torch.bmm(query, context.transpose(1,2).contiguous())
         attention_scores = attention_scores.view(batch_size*output_len, context_len)
         attention_scores.masked_fill_((1 - attention_mask), -NEAR_INF)
@@ -169,7 +167,7 @@ class IBMAttentionLayer(nn.Module):
 class DecoderRNN(nn.Module):
     """Generates a sequence of tokens in response to context."""
 
-    def __init__(self, vocab_size, embed_size, hidden_size, num_layers, pad_idx, dropout=0, attention_flag = True):
+    def __init__(self, vocab_size, embed_size, hidden_size, num_layers, pad_idx, dropout=0, attention_type='general'):
         """Initialize encoder.
         :param vocab_size: voc size for lt
         :param embed_size: embedding size for lt
@@ -187,7 +185,7 @@ class DecoderRNN(nn.Module):
         self.gru = nn.GRU(
             self.embed_size, self.hidden_size, num_layers=self.num_layers, batch_first=True, dropout=dropout if num_layers > 1 else 0,
         )
-        self.attention = IBMAttentionLayer(self.hidden_size) if attention_flag else None;
+        self.attention = IBMAttentionLayer(self.hidden_size, attention_type) if attention_type is not False else None;
 
         self.out = nn.Linear(self.hidden_size, self.vocab_size)
 
@@ -226,7 +224,7 @@ class seq2seq(nn.Module):
     """
     def __init__(self, vocab_size_encoder, vocab_size_decoder, embedding_size, encoder_type='rnn', hidden_size=64, num_layers=2, lr=0.01, 
                        pad_idx=PAD_IDX, sos_idx=SOS_IDX, eos_idx=EOS_IDX, encoder_shared_lt=False, dropout=0.0, use_cuda=True, optimizer='Adam', 
-                       grad_clip=None, encoder_attention = False, self_attention = False):
+                       grad_clip=None, encoder_attention = 'general', self_attention = False):
 
         super().__init__()
         self.opts = {}
@@ -456,9 +454,10 @@ class seq2seq(nn.Module):
             cell = cell.index_select(1, indices)
             hidden = (hid, cell)
 
-        enc_out = enc_out.index_select(0, indices)
+        enc_out = enc_out.index_select(1, indices)
+        attention_mask = attention_mask.index_select(0, indices)
 
-        return enc_out, hidden#, attn_mask
+        return enc_out, hidden, attention_mask
     
     
     def reorder_decoder_incremental_state(self, incremental_state, inds):
@@ -495,4 +494,5 @@ class seq2seq(nn.Module):
 
         if 'beam' in decoding_strategy:
             beams = self.decode_beam(int(decoding_strategy.split(':')[-1]), len(batch.text_lens), encoder_states)
+            pred_scores = beams
             return pred_scores
