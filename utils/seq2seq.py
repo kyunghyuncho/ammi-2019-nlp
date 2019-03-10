@@ -117,7 +117,7 @@ class EncoderRNN(nn.Module):
             embedded = pack_padded_sequence(embedded, text_lens, batch_first=True)
         output, hidden = self.gru(embedded, hidden)
         if use_packed is True:
-            output, output_lens = pad_packed_sequence(output)
+            output, output_lens = pad_packed_sequence(output, batch_first=True)
         
         return output, hidden, attention_mask
 
@@ -137,28 +137,30 @@ class IBMAttentionLayer(nn.Module):
         self.softmax = nn.Softmax(dim=-1)
         self.tanh = nn.Tanh()
 
-    def forward(self, query, context, attention_mask):
+    def forward(self, decoder_output, decoder_hidden, encoder_output, attention_mask):
 
-        context = context.transpose(0,1)
-        batch_size, output_len, dimensions = query.size()
-        context_len = context.size(1)
+
+        batch_size, seq_length, hidden_size = encoder_output.size()
+        last_hidden_layer = decoder_hidden[-1].unsqueeze(1)
+
+        encoder_output_t = encoder_output.transpose(1,2)
+
 
         if self.attention_type == 'general':
-            query = query.view(batch_size * output_len, dimensions)
-            query = self.linear_in(query)
-            query = query.view(batch_size, output_len, dimensions)
+            hid = self.linear_in(last_hidden_layer)
+        else:
+            hid = last_hidden_layer
 
-        attention_scores = torch.bmm(query, context.transpose(1,2).contiguous())
-        attention_scores = attention_scores.view(batch_size*output_len, context_len)
+        attention_scores = torch.bmm(hid, encoder_output_t).squeeze(1)
+
         attention_scores.masked_fill_((1 - attention_mask), -NEAR_INF)
         attention_weights = self.softmax(attention_scores)
-        attention_weights = attention_weights.view(batch_size, output_len, context_len)
 
-        mix = torch.bmm(attention_weights, context)
-        combined = torch.cat((mix, query), dim=2)
-        combined = combined.view(batch_size*output_len, 2*dimensions)
+        mix = torch.bmm(attention_weights.unsqueeze(1), encoder_output)
 
-        output = self.linear_out(combined).view(batch_size, output_len, dimensions)
+        combined = torch.cat((decoder_output.squeeze(1), mix.squeeze(1)), dim=1)
+
+        output = self.linear_out(combined).unsqueeze(1)
         output = self.tanh(output)
 
         return output, attention_weights
@@ -205,7 +207,7 @@ class DecoderRNN(nn.Module):
         for i in range(seqlen):
             decoder_output, decoder_hidden = self.gru(emb[:,i,:].unsqueeze(1), decoder_hidden)
             if self.attention is not None:
-                decoder_output_attended, attn_weights = self.attention(decoder_output, encoder_output, attention_mask)
+                decoder_output_attended, attn_weights = self.attention(decoder_output, decoder_hidden, encoder_output, attention_mask)
                 output.append(decoder_output_attended)
                 attn_w_log.append(attn_weights)
             else:
@@ -363,7 +365,7 @@ class seq2seq(nn.Module):
             finish_mask += (_preds == self.opts['eos_idx']).view(-1)
             xs = _preds
             
-        return scores, preds, attn_w_log
+        return scores, preds, _attn_w_log
 
     def decode_beam(self, beam_size, batch_size, encoder_states):
         dev = self.opts['device']
@@ -470,7 +472,7 @@ class seq2seq(nn.Module):
                 for x in incremental_state)
 
 
-    def eval_step(self, batch, decoding_strategy='score'):
+    def eval_step(self, batch, decoding_strategy='score', dump=False):
         xs, ys, use_packed = batch.text_vecs, batch.label_vecs, batch.use_packed
         xs_lens, ys_lens = batch.text_lens, batch.label_lens
             
@@ -490,7 +492,11 @@ class seq2seq(nn.Module):
             length_penalties = torch.Tensor([Beam.get_length_penalty(i) for i in pred_lengths.tolist()]).to(scores.device)
             scores_length_penalized = scores.sum(dim=1) / length_penalties
             pred_scores = tuple((p, s) for p,s in zip(preds,scores_length_penalized))
-            return pred_scores
+            if dump is True:
+                _dump = [attn_w_log]
+                return pred_scores, _dump
+            else:
+                return pred_scores
 
         if 'beam' in decoding_strategy:
             beams = self.decode_beam(int(decoding_strategy.split(':')[-1]), len(batch.text_lens), encoder_states)

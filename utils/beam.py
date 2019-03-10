@@ -152,7 +152,7 @@ class Beam(object):
         """
         if len(self.finished) == 0:
             # we change output because we want outputs to have eos
-            # to pass assert in L102, it is ok since empty self.finished
+            # it is ok since empty self.finished
             # means junk prediction anyway
             self.outputs[-1][0] = self.eos
             hyptail = self.HypothesisTail(timestep=len(self.outputs) - 1,
@@ -161,3 +161,79 @@ class Beam(object):
                                           tokenid=self.outputs[-1][0])
 
             self.finished.append(hyptail)
+
+
+    def get_beam_dot(self, dictionary=None, n_best=None):
+        """Create pydot graph representation of the beam.
+
+        :param outputs: self.outputs from the beam
+        :param dictionary: tok 2 word dict to save words in the tree nodes
+        :returns: pydot graph
+        """
+        try:
+            import pydot
+        except ImportError:
+            print("Please install pydot package to dump beam visualization")
+
+        graph = pydot.Dot(graph_type='digraph')
+        outputs = [i.tolist() for i in self.outputs]
+        bookkeep = [i.tolist() for i in self.bookkeep]
+        all_scores = [i.tolist() for i in self.all_scores]
+        if n_best is None:
+            n_best = int(self.beam_size / 2)
+
+        # get top nbest hyp
+        top_hyp_idx_n_best = []
+        n_best_colors = ['aquamarine', 'chocolate1', 'deepskyblue',
+                         'green2', 'tan']
+        sorted_finished = self.get_rescored_finished(n_best=n_best)
+        for hyptail in sorted_finished:
+            # do not include EOS since it has rescored score not from original
+            # self.all_scores, we color EOS with black
+            top_hyp_idx_n_best.append(self.get_hyp_from_finished(
+                hyptail))
+
+        # create nodes
+        for tstep, lis in enumerate(outputs):
+            for hypid, token in enumerate(lis):
+                if tstep == 0:
+                    hypid = 0  # collapse all __NULL__ nodes
+                node_tail = self.HypothesisTail(timestep=tstep, hypid=hypid,
+                                                score=all_scores[tstep][hypid],
+                                                tokenid=token)
+                color = 'white'
+                rank = None
+                for i, hypseq in enumerate(top_hyp_idx_n_best):
+                    if node_tail in hypseq:
+                        if n_best <= 5:  # color nodes only if <=5
+                            color = n_best_colors[i]
+                        rank = i
+                        break
+                label = (
+                    "<{}".format(dictionary.vec2txt([token])
+                                 if dictionary is not None else token) +
+                    " : " +
+                    "{:.{prec}f}>".format(all_scores[tstep][hypid], prec=3))
+
+                graph.add_node(pydot.Node(
+                    node_tail.__repr__(), label=label, fillcolor=color,
+                    style='filled',
+                    xlabel='{}'.format(rank) if rank is not None else ''))
+
+        # create edges
+        for revtstep, lis in reversed(list(enumerate(bookkeep))):
+            for i, prev_id in enumerate(lis):
+                from_node = graph.get_node(
+                    '"{}"'.format(self.HypothesisTail(
+                        timestep=revtstep, hypid=prev_id,
+                        score=all_scores[revtstep][prev_id],
+                        tokenid=outputs[revtstep][prev_id]).__repr__()))[0]
+                to_node = graph.get_node(
+                    '"{}"'.format(self.HypothesisTail(
+                        timestep=revtstep + 1, hypid=i,
+                        score=all_scores[revtstep + 1][i],
+                        tokenid=outputs[revtstep + 1][i]).__repr__()))[0]
+                newedge = pydot.Edge(from_node.get_name(), to_node.get_name())
+                graph.add_edge(newedge)
+
+        return graph
