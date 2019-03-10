@@ -182,7 +182,8 @@ class seq2seq(nn.Module):
             return
         xs = xs.to(self.device)
         bsz = xs.size(0)
-        
+        ys = torch.cat((xs[0, 1:].unsqueeze(0), torch.LongTensor([[gl.EOS_IDX]])), dim=1)
+    
         # just predict
         self.encoder.eval()
         self.decoder.eval()
@@ -212,9 +213,11 @@ class seq2seq(nn.Module):
             decoder_input = self.encoder(encoder_input)
             decoder_output = self.decoder(decoder_input)
             
+            loss = self.criterion(decoder_output, torch.LongTensor([ys[0][i]]))
+            
             _max_score, next_token = decoder_output.max(1)
             
-            scores = scores + _max_score
+            scores = scores + loss.item()
             score_counts += 1
             
             if score_only:   # replace the next token with the one in the input data
@@ -238,39 +241,7 @@ class seq2seq(nn.Module):
                 break
                 
         predictions = [self.v2t(p) for p in predictions]
-#         predictions = [[p[i][0] for p in predictions] for i in range(bsz)]
         scores = scores / score_counts
     
         return predictions, scores
     
-    def score(data):
-        generated, score = self.eval_step(data, score_only=score_only)  
-        sentences_lst = []
-        scores_lst = []
-        for k in range(xs.size(0)):
-            context = [self.v2t(d) for d in data][k]
-            context = [c[0] for c in context]
-            
-            sentences_lst.append(' '.join(context))
-            scores_lst.append(math.exp(score[k]))
-
-        return sentences_lst, scores_lst
-    
-    def generate(self, data, use_context=False):
-        generated, scores = self.eval_step(data, use_context=use_context)  
-        contexts_lst = [] 
-        scores_lst = []
-        generated_lst = []
-        
-        for k in range(xs.size(0)):
-            if use_context:
-                context = [self.v2t(d) for d in data][k]
-                context = [c[0] for c in context]
-                print("Context: ", ' '.join(context))  # print only one generated sentence out of the bsz 
-            
-            generated_str = [' '.join(g) for g in generated] # convert them to more readable strings     
-            print("Generated ", generated_str[k])  # print only one generated sentence out of the bsz 
-            
-            print("Score:    ", math.exp(scores[k]))  # print only one generated sentence out of the bsz 
-            print("")
-            

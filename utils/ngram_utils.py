@@ -418,6 +418,9 @@ class NgramLM:
             prev_tokens = tuple(list(prev_tokens[1:]) + [next_token])
             sentence.append(next_token)
             print(' '.join(sentence))
+            if next_token == '<eos>':
+                break
+                
         return ' '.join(sentence)
     
     def get_perplexity(self, test_sentences, subsample=None):
