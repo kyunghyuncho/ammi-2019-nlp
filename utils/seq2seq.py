@@ -7,7 +7,7 @@ from global_variables import SOS_IDX, SOS_TOKEN, EOS_IDX, EOS_TOKEN, UNK_IDX, UN
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 import math
-
+import pdb
 
 class BagOfWords(nn.Module):
     def init_layers(self):
@@ -264,7 +264,7 @@ class seq2seq(nn.Module):
         if optimizer == 'Adam':
             self.optimizer = optim_class(self.parameters(), self.opts['lr'], amsgrad=True)
         elif optimizer == 'SGD':
-            self.optimizer = optim.SGD(self.parameters(), lr=lr, nesterov=True, momentum=0.99)
+            self.optimizer = optim.SGD(self.parameters(), lr=self.opts['lr'], nesterov=True, momentum=0.99)
         else:
             self.optimizer = optim_class(self.parameters(), self.opts['lr'])
 
@@ -292,6 +292,7 @@ class seq2seq(nn.Module):
             ppl = math.exp(avg_loss)
             print('Loss: {}\nPPL: {}'.format(avg_loss, ppl))
             return ppl, avg_loss
+
 
     def save_model(self, filename):
         state_dict = self.state_dict()
@@ -430,6 +431,7 @@ class seq2seq(nn.Module):
         encoder_states = self.encoder(xs, xs_lens, use_packed=use_packed)
 
         loss = self.compute_loss(encoder_states, xs_lens, ys)
+        # pdb.set_trace()
         loss.backward()
         self.update_params()
 
