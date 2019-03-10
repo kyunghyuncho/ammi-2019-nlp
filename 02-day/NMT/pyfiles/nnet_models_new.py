@@ -2,7 +2,7 @@ import torch
 from torch import optim
 import torch.nn as nn
 import torch.nn.functional as F
-import global_variables
+import global_variables_2 as global_variables
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import math
 
