@@ -91,6 +91,7 @@ class EncoderRNN(nn.Module):
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.dropout = nn.Dropout(p=dropout)
+        self.pad_idx = pad_idx
         
         if shared_lt is None:
             self.embedding = nn.Embedding(self.vocab_size, self.embed_size, pad_idx)
@@ -109,6 +110,8 @@ class EncoderRNN(nn.Module):
         :param use_packed: either we pack seqs, assumed sorted if True
         """
         embedded = self.embedding(text_vec)
+        attention_mask = text_vec.ne(self.pad_idx)
+
         embedded = self.dropout(embedded)
         if use_packed is True:
             embedded = pack_padded_sequence(embedded, text_lens, batch_first=True)
@@ -116,7 +119,7 @@ class EncoderRNN(nn.Module):
         if use_packed is True:
             output, output_lens = pad_packed_sequence(output)
         
-        return output, hidden
+        return output, hidden, attention_mask
 
 
 
@@ -208,9 +211,8 @@ class IBMAttentionLayer(nn.Module):
         self.softmax = nn.Softmax(dim=-1)
         self.tanh = nn.Tanh()
 
-    def forward(self, query, context):
+    def forward(self, query, context, attention_mask):
 
-        query = query.transpose(0,1)
         context = context.transpose(0,1)
         batch_size, output_len, dimensions = query.size()
         context_len = context.size(1)
@@ -224,6 +226,7 @@ class IBMAttentionLayer(nn.Module):
 #         print('context: ', context.shape)
         attention_scores = torch.bmm(query, context.transpose(1,2).contiguous())
         attention_scores = attention_scores.view(batch_size*output_len, context_len)
+        attention_scores.masked_fill_((1 - attention_mask), -NEAR_INF)
         attention_weights = self.softmax(attention_scores)
         attention_weights = attention_weights.view(batch_size, output_len, context_len)
 
@@ -270,6 +273,7 @@ class DecoderRNN(nn.Module):
         emb = self.embedding(text_vec)
         emb = self.dropout(emb)
         seqlen = text_vec.size(1)
+        encoder_output, encoder_hidden, attention_mask = encoder_states
         
         decoder_hidden = decoder_hidden
         output = []
@@ -277,7 +281,7 @@ class DecoderRNN(nn.Module):
         for i in range(seqlen):
             decoder_output, decoder_hidden = self.gru(emb[:,i,:].unsqueeze(1), decoder_hidden)
             if self.attention is not None:
-                decoder_output_attended, attn_weights = self.attention(decoder_hidden[-1].unsqueeze(0), encoder_states[0])
+                decoder_output_attended, attn_weights = self.attention(decoder_output, encoder_output, attention_mask)
                 output.append(decoder_output_attended)
                 attn_w_log.append(attn_weights)
             else:
@@ -395,33 +399,32 @@ class seq2seq(nn.Module):
 
     
     def decode_forced(self, ys, encoder_states, xs_lens):
-        encoder_output, encoder_hidden = encoder_states
+        encoder_output, encoder_hidden, attention_mask = encoder_states
         
-        bsz = ys.size(0)
+        batch_size = ys.size(0)
         target_length = ys.size(1)
         longest_label = max(target_length, self.longest_label)
-        starts = self.sos_buffer.expand(bsz, 1).long()  # expand to batch size
+        starts = self.sos_buffer.expand(batch_size, 1).long()  # expand to batch size
         
         # Teacher forcing: Feed the target as the next input
         y_in = ys.narrow(1, 0, ys.size(1) - 1)
         decoder_input = torch.cat([starts, y_in], 1)
         decoder_output, decoder_hidden, attn_w_log = self.decoder(decoder_input, encoder_hidden, encoder_states)
         _, preds = decoder_output.max(dim=2)
-        #import ipdb; ipdb.set_trace()
         
         return decoder_output, preds, attn_w_log
     
-    def decode_greedy(self, encoder_states, bsz):
-        encoder_output, encoder_hidden = encoder_states
+    def decode_greedy(self, encoder_states, batch_size):
+        encoder_output, encoder_hidden, attention_mask = encoder_states
         
-        starts = self.sos_buffer.expand(bsz, 1)  # expand to batch size
+        starts = self.sos_buffer.expand(batch_size, 1)  # expand to batch size
         decoder_hidden = encoder_hidden  # no attention yet
 
         # greedy decoding here        
         preds = [starts]
         scores = []
         
-        finish_mask = torch.Tensor([0]*bsz).byte().to(self.opts['device'])
+        finish_mask = torch.Tensor([0]*batch_size).byte().to(self.opts['device'])
         xs = starts
         _attn_w_log = []
         
@@ -435,7 +438,6 @@ class seq2seq(nn.Module):
             finish_mask += (_preds == self.opts['eos_idx']).view(-1)
             xs = _preds
             
-        #import ipdb; ipdb.set_trace()
         return scores, preds, attn_w_log
 
     def decode_beam(self, beam_size, batch_size, encoder_states):
@@ -470,7 +472,6 @@ class seq2seq(nn.Module):
         beam_preds_scores = [list(b.get_top_hyp()) for b in beams]
         for pair in beam_preds_scores:
             pair[0] = Beam.get_pretty_hypothesis(pair[0])
-        #import ipdb; ipdb.set_trace()
 
         return beam_preds_scores
 
@@ -501,13 +502,14 @@ class seq2seq(nn.Module):
         self.train_mode()
 
         encoder_states = self.encoder(xs, xs_lens, use_packed=use_packed)
+
         loss = self.compute_loss(encoder_states, xs_lens, ys)
         loss.backward()
         self.update_params()
 
     def reorder_encoder_states(self, encoder_states, indices):
         """Reorder encoder states according to a new set of indices."""
-        enc_out, hidden = encoder_states
+        enc_out, hidden, attention_mask = encoder_states
 
         # LSTM or GRU/RNN hidden state?
         if isinstance(hidden, torch.Tensor):
@@ -547,6 +549,7 @@ class seq2seq(nn.Module):
             
         self.eval_mode()
         encoder_states = self.encoder(xs, xs_lens, use_packed=use_packed)
+
         if decoding_strategy == 'score':
             assert ys is not None
             _ = self.compute_loss(encoder_states, xs_lens, ys)
