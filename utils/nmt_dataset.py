@@ -49,6 +49,7 @@ class Lang:
 			
 		if self.word2count[word] >= self.minimum_count:
 			if word not in self.index2word:
+				word = str(word);
 				self.word2index[word] = self.n_words
 				self.index2word.append(word)
 				self.n_words += 1
@@ -71,7 +72,6 @@ class Lang:
 		return torch.from_numpy(np.array(index_list)).to(device)
 
 
-
 def read_one_dataset(file):
 	f = open(file)
 	list_l = []
@@ -80,6 +80,7 @@ def read_one_dataset(file):
 	df = pd.DataFrame()
 	df['data'] = list_l
 	return df
+
 
 def read_dataset(filepath_dict):
 	main_df = pd.DataFrame();
@@ -129,7 +130,13 @@ def load_or_create_language_obj(source_name, source_lang_obj_path, source_data, 
 
 def load_language_pairs(filepath, source_name = 'en', target_name = 'vi',
 						lang_obj_path = '.',  minimum_count = 5):
-	main_df = read_dataset(filepath);
+
+	source = read_dataset(filepath['source']);
+	target = read_dataset(filepath['target']);
+	
+	main_df = pd.DataFrame();
+	main_df['source_data'] = source['data'];
+	main_df['target_data'] = target['data'];
 	
 	
 	source_lang_obj = load_or_create_language_obj(source_name, lang_obj_path, main_df['source_data'], minimum_count);
@@ -152,6 +159,8 @@ def load_language_pairs(filepath, source_name = 'en', target_name = 'vi',
 class LanguagePair(Dataset):
 	def __init__(self, source_name, target_name, filepath, 
 					lang_obj_path, val = False, minimum_count = 5, max_num = None):
+
+		##filepath is a dict with keys source and target
 		
 		self.source_name = source_name;
 		self.target_name = target_name;
@@ -176,6 +185,24 @@ class LanguagePair(Dataset):
 		
 		return return_list 
 
+def argsort(keys, *lists, descending=True):
+    """Reorder each list in lists by the (descending) sorted order of keys.
+    :param iter keys: Keys to order by.
+    :param list[list] lists: Lists to reordered by keys's order.
+                             Correctly handles lists and 1-D tensors.
+    :param bool descending: Use descending order if true.
+    :returns: The reordered items.
+    """
+    ind_sorted = sorted(range(len(keys)), key=lambda k: keys[k])
+    if descending:
+        ind_sorted = list(reversed(ind_sorted))
+    output = []
+    for lst in lists:
+        if isinstance(lst, torch.Tensor):
+            output.append(lst[ind_sorted])
+        else:
+            output.append([lst[i] for i in ind_sorted])
+    return output
 
 def argsort(keys, *lists, descending=False):
     """Reorder each list in lists by the (descending) sorted order of keys.
@@ -228,7 +255,11 @@ def vocab_collate_func(batch, MAX_LEN):
 								mode="constant", constant_values=PAD_IDX)
 		source_data.append(padded_vec_s1)
 		target_data.append(padded_vec_s2)
-		
+
+	packed = True;
+	if packed:
+		source_data, source_len, target_data, target_len = argsort(source_len, source_data, source_len, target_data, target_len, descending=True)
+	
 	
 	packed = True;
 	if packed:
