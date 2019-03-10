@@ -72,7 +72,7 @@ class Lang:
 		return torch.from_numpy(np.array(index_list)).to(device)
 
 
-def read_one_dataset(file):
+def read_dataset(file):
 	f = open(file)
 	list_l = []
 	for line in f:
@@ -80,13 +80,6 @@ def read_one_dataset(file):
 	df = pd.DataFrame()
 	df['data'] = list_l
 	return df
-
-
-def read_dataset(filepath_dict):
-	main_df = pd.DataFrame();
-	for x in filepath_dict.keys():
-		main_df[x+'_data'] = read_one_dataset(filepath_dict[x])['data'];
-	return main_df
 
 
 def token2index_dataset(df, source_lang_obj, target_lang_obj):
@@ -185,24 +178,6 @@ class LanguagePair(Dataset):
 		
 		return return_list 
 
-def argsort(keys, *lists, descending=True):
-    """Reorder each list in lists by the (descending) sorted order of keys.
-    :param iter keys: Keys to order by.
-    :param list[list] lists: Lists to reordered by keys's order.
-                             Correctly handles lists and 1-D tensors.
-    :param bool descending: Use descending order if true.
-    :returns: The reordered items.
-    """
-    ind_sorted = sorted(range(len(keys)), key=lambda k: keys[k])
-    if descending:
-        ind_sorted = list(reversed(ind_sorted))
-    output = []
-    for lst in lists:
-        if isinstance(lst, torch.Tensor):
-            output.append(lst[ind_sorted])
-        else:
-            output.append([lst[i] for i in ind_sorted])
-    return output
 
 def argsort(keys, *lists, descending=False):
     """Reorder each list in lists by the (descending) sorted order of keys.
