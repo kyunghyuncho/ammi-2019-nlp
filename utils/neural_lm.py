@@ -113,7 +113,7 @@ class seq2seq(nn.Module):
     def v2t(self, vector):
         return [self.id2token[i] for i in vector]
         
-    def train_step(self, xs, ys, eval_mode=True):
+    def train_step(self, xs, ys):
         """Train model to produce ys given xs.
         :param batch: parlai.core.torch_agent.Batch, contains tensorized
                       version of observations.
@@ -126,12 +126,9 @@ class seq2seq(nn.Module):
         ys = ys.to(self.device)
 
         self.zero_grad()
-        if not eval_mode:
-            self.encoder.train()
-            self.decoder.train()
-        else:
-            self.encoder.eval()
-            self.decoder.eval()
+
+        self.encoder.train()
+        self.decoder.train()
             
         bow_output = self.encoder(xs)
         decoder_output = self.decoder(bow_output)
@@ -144,8 +141,33 @@ class seq2seq(nn.Module):
         _max_score, predictions = decoder_output.max(1)
         
         return self.v2t(predictions), loss.item() 
+    
+    def eval_step(self, xs, ys):
+        """Train model to produce ys given xs.
+        :param batch: parlai.core.torch_agent.Batch, contains tensorized
+                      version of observations.
+        Return estimated responses, with teacher forcing on the input sequence
+        (list of strings of length batchsize).
+        """
+        if xs is None:
+            return
+        xs = xs.to(self.device)
+        ys = ys.to(self.device)
 
-    def eval_step(self, xs, use_context=False, score_only=False):
+        self.zero_grad()
+
+        self.encoder.eval()
+        self.decoder.eval()
+            
+        bow_output = self.encoder(xs)
+        decoder_output = self.decoder(bow_output)
+            
+        loss = self.criterion(decoder_output, ys.view(-1))
+        _max_score, predictions = decoder_output.max(1)
+        
+        return self.v2t(predictions), loss.item() 
+
+    def evaluate(self, xs, use_context=False, score_only=False):
         """Generate a response to the input tokens.
         :param batch: parlai.core.torch_agent.Batch, contains tensorized
                       version of observations.
@@ -243,4 +265,4 @@ class seq2seq(nn.Module):
             
             print("Score:    ", math.exp(scores[k]))  # print only one generated sentence out of the bsz 
             print("")
-      
+            

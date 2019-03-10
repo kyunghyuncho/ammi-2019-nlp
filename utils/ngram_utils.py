@@ -82,7 +82,7 @@ def get_vocab(data, frac_vocab=0.9):
 
 def get_dict(vocab):
     id2token = list(vocab)
-    token2id = dict(zip(vocab, range(4, 4+len(vocab)))) 
+    token2id = dict(zip(vocab, range(3, 3+len(vocab)))) 
     id2token = [gl.UNK_TOKEN, gl.SOS_TOKEN, gl.EOS_TOKEN] + id2token
 
     token2id[gl.UNK_TOKEN] = gl.UNK_IDX
