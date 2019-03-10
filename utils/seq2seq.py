@@ -456,7 +456,7 @@ class seq2seq(nn.Module):
             cell = cell.index_select(1, indices)
             hidden = (hid, cell)
 
-        enc_out = enc_out.index_select(1, indices)
+        enc_out = enc_out.index_select(0, indices)
         attention_mask = attention_mask.index_select(0, indices)
 
         return enc_out, hidden, attention_mask

@@ -97,7 +97,13 @@ class TextDataset(Dataset):
         return ' '.join([self.ind2word[i] for i in list_ids])
     
     def pred2text(self, tensor):
-        return ' '.join(list(stop_comprehension() if (i.item() == EOS_IDX) or (i.item() == PAD_IDX) else self.ind2word[i.item()] for i in tensor ))
+        result = []
+        for i in range(tensor.size(0)):
+            if tensor[i].item() == EOS_IDX  or tensor[i].item() == PAD_IDX:
+                break
+            else:
+                result.append(self.ind2word[tensor[i].item()])
+        return ' '.join(result)
                 
     def __len__(self):
         return len(self.input_text)
