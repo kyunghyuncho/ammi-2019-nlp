@@ -25,17 +25,6 @@ import math
 tokenizer = spacy.load('en_core_web_sm')               
 punctuations = '"#$%&\()*+-/:;<=>@[\\]^_`{|}~'   # kept ' , . ? ! 
 
-# punctuations = string.punctuation
-# TAG_RE = re.compile(r'<[^>]+>') # get rid off HTML tags from the data
-# def remove_tags(text):
-#     return TAG_RE.sub('', text)
-
-# def lower_case(parsed):
-#     return [token.text.lower() for token in parsed] #and (token.is_stop is False)]
-
-# def remove_punc(parsed):
-#     return [token.text for token in parsed if (token.text not in punctuations)]
-
 def lower_case_remove_punc(parsed):
     return [token.text.lower() for token in parsed if (token.text not in punctuations)]
 
