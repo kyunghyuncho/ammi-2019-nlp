@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import re
 from collections import Counter, namedtuple
-from tqdm import tqdm_notebook as tqdm
+from tqdm import tqdm
 from global_variables import SOS_IDX, SOS_TOKEN, EOS_IDX, EOS_TOKEN, UNK_IDX, UNK_TOKEN, PAD_IDX, PAD_TOKEN, SEP_IDX, SEP_TOKEN, device
 
 RETOK = re.compile(r'\w+|[^\w\s]|\n', re.UNICODE)
